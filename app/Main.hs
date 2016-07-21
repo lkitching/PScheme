@@ -1,6 +1,7 @@
 module Main where
 
 import PScheme.Reader
+import PScheme.Eval
 import Control.Monad (forever)
 import System.IO (hFlush, stdout)
 
@@ -12,15 +13,18 @@ formatError Incomplete = "Incomplete expression"
 formatError (ExpectedChar c) = "Expected '" ++ (show c) ++ "\""
 formatError (BadNumber s) = "Invalid number: " ++ s
 
-readEval :: String -> String
-readEval s = either formatError evalExpr (snd $ runRead s readExpr)
+showEval :: Env -> Expr -> String
+showEval env expr = either show show (eval env expr)
+
+readEval :: Env -> String -> String
+readEval env s = either formatError (showEval env) (snd $ runRead s readExpr)
 
 repl :: IO ()
 repl = do
   putStr "pscheme> "
   hFlush stdout
   l <- getLine
-  putStrLn $ readEval l
+  putStrLn $ readEval defaultEnv l
 
 main :: IO ()
 main = forever repl
