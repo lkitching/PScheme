@@ -65,8 +65,8 @@ ifSpecial env [test, ifTrue, ifFalse] = do
   eval env (if n == 0 then ifFalse else ifTrue) 
 
 defaultEnv :: Env
-defaultEnv = M.fromList [("plus", (Fn plusFn)),
-                         ("minus", (Fn minusFn)),
+defaultEnv = M.fromList [("+", (Fn plusFn)),
+                         ("-", (Fn minusFn)),
                          ("*", (Fn $ arithFn product)),
                          ("if", (Special ifSpecial))]
 

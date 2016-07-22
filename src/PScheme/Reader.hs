@@ -46,6 +46,9 @@ expectChar c = R $ \s -> case s of
   (a:cs) | c == a -> (cs, Right ())
   _ -> (s, Left $ ExpectedChar c)
 
+peek :: Reader (Maybe Char)
+peek = R $ \s -> (s, Right $ listToMaybe s)
+
 peekOne :: Reader Char
 peekOne = R $ \s -> case s of
   [] -> (s, Left Incomplete)
@@ -103,6 +106,14 @@ tryReadNumber s = case (reads s) of
 readNumber :: Reader Integer
 readNumber = R $ \s -> let (i, rest) = span (not . isDelimiter) s in (rest, tryReadNumber i)
 
+readNumberOrSym :: Char -> (Integer -> Integer) -> Reader Expr
+readNumberOrSym prefix modifier = do
+  mNext <- peek
+  case mNext of
+    Nothing -> return (Symbol [prefix])
+    Just c | isDelimiter c -> return (Symbol [prefix])
+    _ -> fmap (Number . modifier) readNumber
+  
 readExpr :: Reader Expr
 readExpr = do
   whitespace
@@ -110,8 +121,8 @@ readExpr = do
   case c of
     '"' -> consumeNext >> readStringExpr
     '(' -> consumeNext >> readListExpr
-    '+' -> consumeNext >> fmap Number readNumber
-    '-' -> consumeNext >> fmap (Number . negate) readNumber
+    '+' -> consumeNext >> (readNumberOrSym '+' id)
+    '-' -> consumeNext >> (readNumberOrSym '-' negate)
     n | isDigit n -> fmap Number readNumber
     _ -> fmap Symbol (readUntil isDelimiter)
   
