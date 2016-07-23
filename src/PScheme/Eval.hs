@@ -26,6 +26,11 @@ instance Show PValue where
   show (Fn _) = "<function>"
   show (Special _) = "<special>"
 
+isTruthy :: PValue -> Bool
+isTruthy (PNumber 0) = False
+isTruthy (PStr "") = False
+isTruthy _ = True
+
 type EvalResult = Either EvalError PValue
 type Env = M.Map String PValue
 
@@ -61,8 +66,7 @@ minusFn = arithFn sub where
 ifSpecial :: Env -> [Expr] -> EvalResult
 ifSpecial env [test, ifTrue, ifFalse] = do
   b <- eval env test
-  n <- expectNum b
-  eval env (if n == 0 then ifFalse else ifTrue) 
+  eval env (if (isTruthy b) then ifTrue else ifFalse) 
 
 defaultEnv :: Env
 defaultEnv = M.fromList [("+", (Fn plusFn)),
