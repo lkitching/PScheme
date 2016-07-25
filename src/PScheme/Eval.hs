@@ -10,23 +10,27 @@ data EvalError =
   | OperatorRequired
   | TypeError String PValue
   | FormError String [Expr]
+  | ArityError Int Int
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
   show OperatorRequired = "Operator required"
   show (TypeError ty value) = "Unexpected type for " ++ (show value) ++ ": required " ++ ty
   show (FormError msg form) = "Invalid form: " ++ msg
+  show (ArityError expected actual) = "Wrong number of arguments (" ++ (show actual) ++ "). Expected: " ++ (show expected)
 
 data PValue =
     PNumber Integer
   | PStr String
   | Fn ([PValue] -> EvalResult)
+  | Closure Env [String] Expr
   | Special (Env -> [Expr] -> EvalResult)
 
 instance Show PValue where
   show (PNumber i) = show i
   show (PStr s) = s
   show (Fn _) = "<function>"
+  show (Closure _ _ _) = "<closure>"
   show (Special _) = "<special>"
 
 isTruthy :: PValue -> Bool
@@ -60,6 +64,13 @@ applyFn env f es = (traverse (eval env) es) >>= (f $)
 applyOp :: Env -> PValue -> [Expr] -> EvalResult
 applyOp env (Fn f) es = applyFn env f es
 applyOp env (Special f) es = f env es
+applyOp env (Closure cEnv paramNames body) argExprs = do
+  args <- traverse (eval env) argExprs
+  if (length paramNames) == (length args) then
+    let argFrame = M.fromList (zip paramNames args)
+        env' = pushEnv argFrame cEnv
+    in  eval env' body
+  else Left $ ArityError (length paramNames) (length args)
 applyOp _ _ _ = Left OperatorRequired
 
 expectNum :: PValue -> Either EvalError Integer
@@ -117,12 +128,19 @@ letSpecial env [bindingExpr, body] = do
       
 letSpecial _ exprs = Left $ FormError "let form requires binding list and expression to evaluate" exprs
 
+lambdaSpecial :: Env -> [Expr] -> EvalResult
+lambdaSpecial env [params, body] = do
+  paramNames <- listOf symbolExpr params
+  Right $ Closure env paramNames body
+lambdaSpecial _ exprs = Left $ FormError "lambda form requires parameter list followed by a body" exprs  
+  
 defaultEnv :: Env
 defaultEnv = [M.fromList [("+", (Fn plusFn)),
                           ("-", (Fn minusFn)),
                           ("*", (Fn $ arithFn product)),
                           ("if", (Special ifSpecial)),
-                          ("let", (Special letSpecial))]]
+                          ("let", (Special letSpecial)),
+                          ("lambda", (Special lambdaSpecial))]]
 
 eval :: Env -> Expr -> EvalResult
 eval env expr = case expr of
