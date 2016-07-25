@@ -2,6 +2,7 @@ module PScheme.Eval where
 
 import PScheme.Reader (Expr(..))
 import Data.Traversable (sequence)
+import Control.Applicative (liftA2)
 import qualified Data.Map.Strict as M
 
 data EvalError =
@@ -85,39 +86,34 @@ ifSpecial env [test, ifTrue, ifFalse] = do
   eval env (if (isTruthy b) then ifTrue else ifFalse)
 ifSpecial _ exprs = Left $ FormError "if form requires test ifTrue and ifFalse expressions" exprs
 
-expectListExpr :: Expr -> Either EvalError [Expr]
-expectListExpr (List es) = Right es
-expectListExpr e = Left $ FormError "expected list" [e]
+type ExprEval a = Expr -> Either EvalError a
 
-expectPairExpr :: Expr -> Either EvalError (Expr, Expr)
-expectPairExpr e = do
-  l <- expectListExpr e
+symbolExpr :: ExprEval String
+symbolExpr (Symbol s) = Right s
+symbolExpr e = Left $ FormError "expected symbol" [e]
+
+listSchema :: ExprEval [Expr]
+listSchema (List es) = Right es
+listSchema e = Left $ FormError "expected list" [e]
+
+listOf :: (ExprEval a) -> (ExprEval [a])
+listOf s e = (listSchema e) >>= (traverse s)
+
+pairOf :: (ExprEval a) -> (ExprEval b) -> (ExprEval (a, b))
+pairOf fs ss e = do
+  l <- listSchema e
   case l of
-    [e1, e2] -> Right (e1, e2)
+    [fe, se] -> liftA2 (,) (fs fe) (ss se)
     _ -> Left $ FormError "expected pair" l
 
-expectSymbolExpr :: Expr -> Either EvalError String
-expectSymbolExpr (Symbol s) = Right s
-expectSymbolExpr e = Left $ FormError "expected symbol" [e]
-
-expectBindingPair :: Expr -> Either EvalError (String, Expr)
-expectBindingPair e = do
-  (nameExpr, valExpr) <- expectPairExpr e
-  varName <- expectSymbolExpr nameExpr
-  return (varName, valExpr)
+valueOf :: Env -> (ExprEval PValue)
+valueOf = eval
   
 letSpecial :: Env -> [Expr] -> EvalResult
 letSpecial env [bindingExpr, body] = do
-  bindingList <- expectListExpr bindingExpr
-  bindingValues <- traverse evalBindingPair bindingList
+  bindingValues <- (listOf (pairOf symbolExpr (valueOf env))) bindingExpr
   let ef = M.fromList bindingValues
   eval (pushEnv ef env) body
-  where
-    evalBindingPair :: Expr -> Either EvalError (String, PValue)
-    evalBindingPair e = do
-      (name, expr) <- expectBindingPair e
-      v <- eval env expr
-      return (name, v)
       
 letSpecial _ exprs = Left $ FormError "let form requires binding list and expression to evaluate" exprs
 
