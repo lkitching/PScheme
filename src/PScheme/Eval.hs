@@ -4,6 +4,9 @@ import PScheme.Reader (Expr(..))
 import Data.Traversable (sequence)
 import Control.Applicative (liftA2)
 import qualified Data.Map.Strict as M
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader
+import Control.Monad.Trans.Except
 
 data EvalError =
     UnboundSymbol String
@@ -42,6 +45,8 @@ type EvalResult = Either EvalError PValue
 type EnvFrame = M.Map String PValue
 type Env = [EnvFrame]
 
+type Eval = ReaderT Env (ExceptT EvalError IO)
+
 newEnv :: Env
 newEnv = []
 
@@ -57,6 +62,7 @@ pushEnv = (:)
 popEnv :: Env -> Env
 popEnv [] = []
 popEnv (_:es) = es
+
 
 applyFn :: Env -> ([PValue] -> EvalResult) -> [Expr] -> EvalResult
 applyFn env f es = (traverse (eval env) es) >>= (f $)
@@ -151,4 +157,30 @@ eval env expr = case expr of
     Nothing -> Left (UnboundSymbol s)
   List l -> case l of
     [] -> Left OperatorRequired
-    e:es -> (eval env e) >>= (\fe -> applyOp env fe es)  
+    e:es -> (eval env e) >>= (\fe -> applyOp env fe es)
+
+exceptT :: Monad m => Either e a -> ExceptT e m a
+exceptT (Left e) = throwE e
+exceptT (Right v) = return v
+
+evalM :: Expr -> Eval PValue
+evalM expr = case expr of
+  Number i -> return $ PNumber i
+  Str s -> return $ PStr s
+  Symbol s -> do
+    env <- ask
+    case (envLookup s env) of
+      Just v -> return v
+      Nothing -> lift $ throwE (UnboundSymbol s)
+  List l -> case l of
+    [] -> lift $ throwE OperatorRequired
+    e:es -> do
+      first <- evalM e
+      env <- ask
+      lift $ exceptT $ applyOp env first es
+
+runEval :: Env -> Eval a -> IO (Either EvalError a)
+runEval env e = runExceptT $ runReaderT e env
+      
+      
+      
