@@ -1,6 +1,7 @@
 module PScheme.Eval where
 
 import PScheme.Reader (Expr(..))
+import PScheme.Env
 import Data.Traversable (sequence)
 import Control.Applicative (liftA2)
 import qualified Data.Map.Strict as M
@@ -26,7 +27,7 @@ data PValue =
     PNumber Integer
   | PStr String
   | Fn ([PValue] -> EvalResult)
-  | Closure Env [String] Expr
+  | Closure (Env PValue) [String] Expr
   | Special ([Expr] -> Eval PValue)
 
 instance Show PValue where
@@ -42,26 +43,7 @@ isTruthy (PStr "") = False
 isTruthy _ = True
 
 type EvalResult = Either EvalError PValue
-type EnvFrame = M.Map String PValue
-type Env = [EnvFrame]
-
-type Eval = ReaderT Env (ExceptT EvalError IO)
-
-newEnv :: Env
-newEnv = []
-
-envLookup :: String -> Env -> Maybe PValue
-envLookup _ [] = Nothing
-envLookup k (e:es) = case (M.lookup k e) of
-  m@(Just _) -> m
-  Nothing -> envLookup k es
-
-pushEnv :: EnvFrame -> Env -> Env
-pushEnv = (:)
-
-popEnv :: Env -> Env
-popEnv [] = []
-popEnv (_:es) = es
+type Eval a = ReaderT (Env PValue) (ExceptT EvalError IO) a
 
 applyFnM :: ([PValue] -> EvalResult) -> [Expr] -> Eval PValue
 applyFnM f exprs = do
@@ -144,7 +126,7 @@ lambdaSpecial [params, body] = do
   pure $ Closure env paramNames body
 lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs  
   
-defaultEnv :: Env
+defaultEnv :: Env PValue
 defaultEnv = [M.fromList [("+", (Fn plusFn)),
                           ("-", (Fn minusFn)),
                           ("*", (Fn $ arithFn product)),
@@ -171,5 +153,5 @@ evalM expr = case expr of
       first <- evalM e
       applyOpM first es
 
-runEval :: Env -> Eval a -> IO (Either EvalError a)
+runEval :: Env PValue -> Eval a -> IO (Either EvalError a)
 runEval env e = runExceptT $ runReaderT e env
