@@ -27,7 +27,7 @@ data PValue =
   | PStr String
   | Fn ([PValue] -> EvalResult)
   | Closure Env [String] Expr
-  | Special (Env -> [Expr] -> EvalResult)
+  | Special ([Expr] -> Eval PValue)
 
 instance Show PValue where
   show (PNumber i) = show i
@@ -63,21 +63,25 @@ popEnv :: Env -> Env
 popEnv [] = []
 popEnv (_:es) = es
 
+applyFnM :: ([PValue] -> EvalResult) -> [Expr] -> Eval PValue
+applyFnM f exprs = do
+  vals <- traverse evalM exprs
+  lift $ exceptT $ f vals
 
-applyFn :: Env -> ([PValue] -> EvalResult) -> [Expr] -> EvalResult
-applyFn env f es = (traverse (eval env) es) >>= (f $)
+failEval :: EvalError -> Eval a
+failEval err = lift $ exceptT $ Left err
 
-applyOp :: Env -> PValue -> [Expr] -> EvalResult
-applyOp env (Fn f) es = applyFn env f es
-applyOp env (Special f) es = f env es
-applyOp env (Closure cEnv paramNames body) argExprs = do
-  args <- traverse (eval env) argExprs
+applyOpM :: PValue -> [Expr] -> Eval PValue
+applyOpM (Fn f) exprs = applyFnM f exprs
+applyOpM (Special f) exprs = f exprs
+applyOpM (Closure cEnv paramNames body) argExprs = do
+  args <- traverse evalM argExprs
   if (length paramNames) == (length args) then
     let argFrame = M.fromList (zip paramNames args)
         env' = pushEnv argFrame cEnv
-    in  eval env' body
-  else Left $ ArityError (length paramNames) (length args)
-applyOp _ _ _ = Left OperatorRequired
+    in  local (const env') (evalM body)
+  else failEval $ ArityError (length paramNames) (length args)  
+applyOpM _ _ = failEval OperatorRequired
 
 expectNum :: PValue -> Either EvalError Integer
 expectNum (PNumber i) = Right i
@@ -97,21 +101,21 @@ minusFn = arithFn sub where
   sub [i] = negate i
   sub ls = foldl1 (-) ls
 
-ifSpecial :: Env -> [Expr] -> EvalResult
-ifSpecial env [test, ifTrue, ifFalse] = do
-  b <- eval env test
-  eval env (if (isTruthy b) then ifTrue else ifFalse)
-ifSpecial _ exprs = Left $ FormError "if form requires test ifTrue and ifFalse expressions" exprs
+ifSpecial :: [Expr] -> Eval PValue
+ifSpecial [test, ifTrue, ifFalse] = do
+  b <- evalM test
+  evalM (if (isTruthy b) then ifTrue else ifFalse)
+ifSpecial exprs = failEval $ FormError "if form requires test ifTrue and ifFalse expressions" exprs
 
-type ExprEval a = Expr -> Either EvalError a
+type ExprEval a = Expr -> Eval a
 
 symbolExpr :: ExprEval String
-symbolExpr (Symbol s) = Right s
-symbolExpr e = Left $ FormError "expected symbol" [e]
+symbolExpr (Symbol s) = pure s
+symbolExpr e = failEval $ FormError "expected symbol" [e]
 
 listSchema :: ExprEval [Expr]
-listSchema (List es) = Right es
-listSchema e = Left $ FormError "expected list" [e]
+listSchema (List es) = pure es
+listSchema e = failEval $ FormError "expected list" [e]
 
 listOf :: (ExprEval a) -> (ExprEval [a])
 listOf s e = (listSchema e) >>= (traverse s)
@@ -121,24 +125,24 @@ pairOf fs ss e = do
   l <- listSchema e
   case l of
     [fe, se] -> liftA2 (,) (fs fe) (ss se)
-    _ -> Left $ FormError "expected pair" l
+    _ -> failEval $ FormError "expected pair" l
 
-valueOf :: Env -> (ExprEval PValue)
-valueOf = eval
+valueOf :: (ExprEval PValue)
+valueOf = evalM
   
-letSpecial :: Env -> [Expr] -> EvalResult
-letSpecial env [bindingExpr, body] = do
-  bindingValues <- (listOf (pairOf symbolExpr (valueOf env))) bindingExpr
+letSpecial :: [Expr] -> Eval PValue
+letSpecial [bindingExpr, body] = do
+  bindingValues <-  (listOf (pairOf symbolExpr valueOf)) bindingExpr
   let ef = M.fromList bindingValues
-  eval (pushEnv ef env) body
-      
-letSpecial _ exprs = Left $ FormError "let form requires binding list and expression to evaluate" exprs
+  local (pushEnv ef) (evalM body)
+letSpecial exprs = failEval $ FormError "let form requires binding list and expression to evaluate" exprs
 
-lambdaSpecial :: Env -> [Expr] -> EvalResult
-lambdaSpecial env [params, body] = do
+lambdaSpecial :: [Expr] -> Eval PValue
+lambdaSpecial [params, body] = do
   paramNames <- listOf symbolExpr params
-  Right $ Closure env paramNames body
-lambdaSpecial _ exprs = Left $ FormError "lambda form requires parameter list followed by a body" exprs  
+  env <- ask
+  pure $ Closure env paramNames body
+lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs  
   
 defaultEnv :: Env
 defaultEnv = [M.fromList [("+", (Fn plusFn)),
@@ -147,17 +151,6 @@ defaultEnv = [M.fromList [("+", (Fn plusFn)),
                           ("if", (Special ifSpecial)),
                           ("let", (Special letSpecial)),
                           ("lambda", (Special lambdaSpecial))]]
-
-eval :: Env -> Expr -> EvalResult
-eval env expr = case expr of
-  Number i -> Right $ PNumber i
-  Str s -> Right $ PStr s
-  Symbol s -> case (envLookup s env) of
-    Just v -> Right v
-    Nothing -> Left (UnboundSymbol s)
-  List l -> case l of
-    [] -> Left OperatorRequired
-    e:es -> (eval env e) >>= (\fe -> applyOp env fe es)
 
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
@@ -176,11 +169,7 @@ evalM expr = case expr of
     [] -> lift $ throwE OperatorRequired
     e:es -> do
       first <- evalM e
-      env <- ask
-      lift $ exceptT $ applyOp env first es
+      applyOpM first es
 
 runEval :: Env -> Eval a -> IO (Either EvalError a)
 runEval env e = runExceptT $ runReaderT e env
-      
-      
-      

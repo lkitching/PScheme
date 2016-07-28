@@ -13,9 +13,6 @@ formatError Incomplete = "Incomplete expression"
 formatError (ExpectedChar c) = "Expected '" ++ (show c) ++ "\""
 formatError (BadNumber s) = "Invalid number: " ++ s
 
-showEval :: Env -> Expr -> String
-showEval env expr = either show show (eval env expr)
-
 readEval :: Env -> String -> IO String
 readEval env s = case (snd $ runRead s readExpr) of
   Left e -> return $ formatError e
