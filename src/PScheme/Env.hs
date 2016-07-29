@@ -4,24 +4,29 @@ module PScheme.Env (
   newEnv,
   envLookup,
   pushEnv,
-  popEnv) where
+  popEnv,
+  mapToFrame,
+  envOf) where
 
 import qualified Data.Map.Strict as M
 import Data.IORef
 
-type EnvFrame = M.Map String
+type EnvFrame a = M.Map String (IORef a)
 type Env a = [EnvFrame a]
 
 newEnv :: Env a
 newEnv = []
 
-mapToFrame :: M.Map String a -> EnvFrame a
-mapToFrame = id
+envOf :: (M.Map String a) -> IO (Env a)
+envOf m = fmap (: []) (mapToFrame m)
 
-envLookup :: String -> Env a -> Maybe a
-envLookup _ [] = Nothing
+mapToFrame :: M.Map String a -> IO (EnvFrame a)
+mapToFrame = traverse newIORef
+
+envLookup :: String -> Env a -> IO (Maybe a)
+envLookup _ [] = pure Nothing
 envLookup k (e:es) = case (M.lookup k e) of
-  m@(Just _) -> m
+  (Just ref) -> fmap Just (readIORef ref)
   Nothing -> envLookup k es
 
 pushEnv :: EnvFrame a -> Env a -> Env a

@@ -26,7 +26,8 @@ repl = do
   putStr "pscheme> "
   hFlush stdout
   l <- getLine
-  r <- readEval defaultEnv l
+  env <- defaultEnv
+  r <- readEval env l
   putStrLn r
 
 main :: IO ()

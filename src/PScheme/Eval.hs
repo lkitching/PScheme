@@ -6,6 +6,7 @@ import Data.Traversable (sequence)
 import Control.Applicative (liftA2)
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Except
 
@@ -58,10 +59,10 @@ applyOpM (Fn f) exprs = applyFnM f exprs
 applyOpM (Special f) exprs = f exprs
 applyOpM (Closure cEnv paramNames body) argExprs = do
   args <- traverse evalM argExprs
-  if (length paramNames) == (length args) then
-    let argFrame = M.fromList (zip paramNames args)
-        env' = pushEnv argFrame cEnv
-    in  local (const env') (evalM body)
+  if (length paramNames) == (length args) then do
+    argFrame <- liftIO $ mapToFrame $  M.fromList (zip paramNames args)
+    let env' = pushEnv argFrame cEnv
+    local (const env') (evalM body)
   else failEval $ ArityError (length paramNames) (length args)  
 applyOpM _ _ = failEval OperatorRequired
 
@@ -115,7 +116,7 @@ valueOf = evalM
 letSpecial :: [Expr] -> Eval PValue
 letSpecial [bindingExpr, body] = do
   bindingValues <-  (listOf (pairOf symbolExpr valueOf)) bindingExpr
-  let ef = M.fromList bindingValues
+  ef <- liftIO $ mapToFrame $ M.fromList bindingValues
   local (pushEnv ef) (evalM body)
 letSpecial exprs = failEval $ FormError "let form requires binding list and expression to evaluate" exprs
 
@@ -126,13 +127,14 @@ lambdaSpecial [params, body] = do
   pure $ Closure env paramNames body
 lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs  
   
-defaultEnv :: Env PValue
-defaultEnv = [M.fromList [("+", (Fn plusFn)),
-                          ("-", (Fn minusFn)),
-                          ("*", (Fn $ arithFn product)),
-                          ("if", (Special ifSpecial)),
-                          ("let", (Special letSpecial)),
-                          ("lambda", (Special lambdaSpecial))]]
+defaultEnv :: IO (Env PValue)
+defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
+                                 ("-", (Fn minusFn)),
+                                 ("*", (Fn $ arithFn product)),
+                                 ("if", (Special ifSpecial)),
+                                 ("let", (Special letSpecial)),
+                                 ("lambda", (Special lambdaSpecial))]
+  
 
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
@@ -144,7 +146,8 @@ evalM expr = case expr of
   Str s -> return $ PStr s
   Symbol s -> do
     env <- ask
-    case (envLookup s env) of
+    var <- liftIO $ envLookup s env
+    case var of
       Just v -> return v
       Nothing -> lift $ throwE (UnboundSymbol s)
   List l -> case l of
