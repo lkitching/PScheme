@@ -3,6 +3,7 @@ module PScheme.Eval where
 import PScheme.Reader (Expr(..))
 import PScheme.Env
 import Data.Traversable (sequence)
+import Data.Foldable (traverse_)
 import Control.Applicative (liftA2)
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.Class (lift)
@@ -16,6 +17,7 @@ data EvalError =
   | TypeError String PValue
   | FormError String [Expr]
   | ArityError Int Int
+  | DerefUndefinedError
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
@@ -23,10 +25,12 @@ instance Show EvalError where
   show (TypeError ty value) = "Unexpected type for " ++ (show value) ++ ": required " ++ ty
   show (FormError msg form) = "Invalid form: " ++ msg
   show (ArityError expected actual) = "Wrong number of arguments (" ++ (show actual) ++ "). Expected: " ++ (show expected)
+  show DerefUndefinedError = "Cannot evaluate undefined"
 
 data PValue =
     PNumber Integer
   | PStr String
+  | Undefined
   | Fn ([PValue] -> EvalResult)
   | Closure (Env PValue) [String] Expr
   | Special ([Expr] -> Eval PValue)
@@ -34,6 +38,7 @@ data PValue =
 instance Show PValue where
   show (PNumber i) = show i
   show (PStr s) = s
+  show Undefined = "<undefined>"
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
   show (Special _) = "<special>"
@@ -112,6 +117,9 @@ pairOf fs ss e = do
 
 valueOf :: (ExprEval PValue)
 valueOf = evalM
+
+anyExpr :: ExprEval Expr
+anyExpr = pure
   
 letSpecial :: [Expr] -> Eval PValue
 letSpecial [bindingExpr, body] = do
@@ -119,6 +127,26 @@ letSpecial [bindingExpr, body] = do
   ef <- liftIO $ mapToFrame $ M.fromList bindingValues
   local (pushEnv ef) (evalM body)
 letSpecial exprs = failEval $ FormError "let form requires binding list and expression to evaluate" exprs
+
+evalNamed :: Env PValue -> (String, Expr) -> Eval (String, PValue)
+evalNamed env (name, expr) = do
+  val <- local (const env) (evalM expr)
+  pure (name, val)
+  
+letrecSpecial :: [Expr] -> Eval PValue
+letrecSpecial [bindingsExpr, body] = do
+  bindingValues <- (listOf (pairOf symbolExpr anyExpr)) bindingsExpr
+  --temporarily bind expressions to Unbound
+  let tmpBindings = (fmap . fmap) (const Undefined) bindingValues
+  tmpFrame <- liftIO $ mapToFrame $ M.fromList tmpBindings
+  env <- ask
+  let tmpEnv = pushEnv tmpFrame env
+  vals <- traverse (evalNamed tmpEnv) bindingValues
+
+  --re-write temp bindings
+  liftIO $ traverse_ (setBinding tmpEnv) vals
+  local (const tmpEnv) (evalM body)
+  
 
 lambdaSpecial :: [Expr] -> Eval PValue
 lambdaSpecial [params, body] = do
@@ -133,6 +161,7 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("*", (Fn $ arithFn product)),
                                  ("if", (Special ifSpecial)),
                                  ("let", (Special letSpecial)),
+                                 ("letrec", (Special letrecSpecial)),
                                  ("lambda", (Special lambdaSpecial))]
   
 

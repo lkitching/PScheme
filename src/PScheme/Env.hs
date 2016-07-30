@@ -6,7 +6,8 @@ module PScheme.Env (
   pushEnv,
   popEnv,
   mapToFrame,
-  envOf) where
+  envOf,
+  setBinding) where
 
 import qualified Data.Map.Strict as M
 import Data.IORef
@@ -23,11 +24,23 @@ envOf m = fmap (: []) (mapToFrame m)
 mapToFrame :: M.Map String a -> IO (EnvFrame a)
 mapToFrame = traverse newIORef
 
+findBinding :: String -> Env a -> Maybe (IORef a)
+findBinding _ [] = Nothing
+findBinding k (e:es) = case (M.lookup k e) of
+  r@(Just _) -> r
+  Nothing -> findBinding k es
+  
 envLookup :: String -> Env a -> IO (Maybe a)
-envLookup _ [] = pure Nothing
-envLookup k (e:es) = case (M.lookup k e) of
-  (Just ref) -> fmap Just (readIORef ref)
-  Nothing -> envLookup k es
+envLookup k env = case (findBinding k env) of
+  Nothing -> pure Nothing
+  (Just ref) -> do
+    v <- readIORef ref
+    return (Just v)
+  
+setBinding :: Env a -> (String, a) -> IO ()
+setBinding env (name, value) = case (findBinding name env) of
+    Nothing -> return ()
+    Just ref -> writeIORef ref value
 
 pushEnv :: EnvFrame a -> Env a -> Env a
 pushEnv = (:)
