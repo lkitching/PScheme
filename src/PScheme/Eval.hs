@@ -32,6 +32,7 @@ data PValue =
     PNumber Integer
   | PStr String
   | Undefined
+  | Quoted Expr
   | Fn ([PValue] -> EvalResult)
   | Closure (Env PValue) [String] Expr
   | Special ([Expr] -> Eval PValue)
@@ -43,6 +44,7 @@ instance Show PValue where
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
   show (Special _) = "<special>"
+  show (Quoted expr) = show expr
 
 isTruthy :: PValue -> Bool
 isTruthy (PNumber 0) = False
@@ -173,7 +175,11 @@ lambdaSpecial [params, body] = do
   paramNames <- listOf symbolExpr params
   env <- ask
   pure $ Closure env paramNames body
-lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs  
+lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs
+
+quoteSpecial :: [Expr] -> Eval PValue
+quoteSpecial [e] = pure $ Quoted e
+quoteSpecial exprs = failEval $ FormError "expected single expression to quote." exprs
   
 defaultEnv :: IO (Env PValue)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
@@ -183,7 +189,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("let", (Special letSpecial)),
                                  ("let*", (Special letStarSpecial)),
                                  ("letrec", (Special letrecSpecial)),
-                                 ("lambda", (Special lambdaSpecial))]
+                                 ("lambda", (Special lambdaSpecial)),
+                                 ("quote", (Special quoteSpecial))]
   
 
 exceptT :: Monad m => Either e a -> ExceptT e m a
