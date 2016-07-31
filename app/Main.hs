@@ -18,7 +18,7 @@ readEval :: Env PValue -> String -> IO String
 readEval env s = case (snd $ runRead s readExpr) of
   Left e -> return $ formatError e
   Right expr -> do
-    result <- runEval env (evalM expr)
+    result <- runEval env (eval expr)
     return $ either show show result
 
 repl :: IO ()

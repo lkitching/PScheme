@@ -53,7 +53,7 @@ type Eval a = ReaderT (Env PValue) (ExceptT EvalError IO) a
 
 applyFnM :: ([PValue] -> EvalResult) -> [Expr] -> Eval PValue
 applyFnM f exprs = do
-  vals <- traverse evalM exprs
+  vals <- traverse eval exprs
   lift $ exceptT $ f vals
 
 failEval :: EvalError -> Eval a
@@ -63,11 +63,11 @@ applyOpM :: PValue -> [Expr] -> Eval PValue
 applyOpM (Fn f) exprs = applyFnM f exprs
 applyOpM (Special f) exprs = f exprs
 applyOpM (Closure cEnv paramNames body) argExprs = do
-  args <- traverse evalM argExprs
+  args <- traverse eval argExprs
   if (length paramNames) == (length args) then do
     argFrame <- liftIO $ mapToFrame $  M.fromList (zip paramNames args)
     let env' = pushEnv argFrame cEnv
-    local (const env') (evalM body)
+    local (const env') (eval body)
   else failEval $ ArityError (length paramNames) (length args)  
 applyOpM _ _ = failEval OperatorRequired
 
@@ -91,8 +91,8 @@ minusFn = arithFn sub where
 
 ifSpecial :: [Expr] -> Eval PValue
 ifSpecial [test, ifTrue, ifFalse] = do
-  b <- evalM test
-  evalM (if (isTruthy b) then ifTrue else ifFalse)
+  b <- eval test
+  eval (if (isTruthy b) then ifTrue else ifFalse)
 ifSpecial exprs = failEval $ FormError "if form requires test ifTrue and ifFalse expressions" exprs
 
 type ExprEval a = Expr -> Eval a
@@ -116,7 +116,7 @@ pairOf fs ss e = do
     _ -> failEval $ FormError "expected pair" l
 
 valueOf :: (ExprEval PValue)
-valueOf = evalM
+valueOf = eval
 
 anyExpr :: ExprEval Expr
 anyExpr = pure
@@ -125,12 +125,12 @@ letSpecial :: [Expr] -> Eval PValue
 letSpecial [bindingExpr, body] = do
   bindingValues <-  (listOf (pairOf symbolExpr valueOf)) bindingExpr
   ef <- liftIO $ mapToFrame $ M.fromList bindingValues
-  local (pushEnv ef) (evalM body)
+  local (pushEnv ef) (eval body)
 letSpecial exprs = failEval $ FormError "let form requires binding list and expression to evaluate" exprs
 
 evalNamed :: Env PValue -> (String, Expr) -> Eval (String, PValue)
 evalNamed env (name, expr) = do
-  val <- local (const env) (evalM expr)
+  val <- local (const env) (eval expr)
   pure (name, val)
   
 letrecSpecial :: [Expr] -> Eval PValue
@@ -145,7 +145,7 @@ letrecSpecial [bindingsExpr, body] = do
 
   --re-write temp bindings
   liftIO $ traverse_ (setBinding tmpEnv) vals
-  local (const tmpEnv) (evalM body)
+  local (const tmpEnv) (eval body)
   
 
 lambdaSpecial :: [Expr] -> Eval PValue
@@ -169,8 +169,8 @@ exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
 exceptT (Right v) = return v
 
-evalM :: Expr -> Eval PValue
-evalM expr = case expr of
+eval :: Expr -> Eval PValue
+eval expr = case expr of
   Number i -> return $ PNumber i
   Str s -> return $ PStr s
   Symbol s -> do
@@ -182,7 +182,7 @@ evalM expr = case expr of
   List l -> case l of
     [] -> lift $ throwE OperatorRequired
     e:es -> do
-      first <- evalM e
+      first <- eval e
       applyOpM first es
 
 runEval :: Env PValue -> Eval a -> IO (Either EvalError a)
