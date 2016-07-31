@@ -2,6 +2,7 @@ module PScheme.Eval where
 
 import PScheme.Reader (Expr(..))
 import PScheme.Env
+import Data.List (intercalate)
 import Data.Traversable (sequence)
 import Data.Foldable (traverse_)
 import Control.Applicative (liftA2)
@@ -31,6 +32,7 @@ instance Show EvalError where
 data PValue =
     PNumber Integer
   | PStr String
+  | PList [PValue]
   | Undefined
   | Quoted Expr
   | Fn ([PValue] -> EvalResult)
@@ -40,6 +42,7 @@ data PValue =
 instance Show PValue where
   show (PNumber i) = show i
   show (PStr s) = s
+  show (PList vals) = "(" ++ (intercalate " " (map show vals)) ++ ")"
   show Undefined = "<undefined>"
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
@@ -190,7 +193,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("let*", (Special letStarSpecial)),
                                  ("letrec", (Special letrecSpecial)),
                                  ("lambda", (Special lambdaSpecial)),
-                                 ("quote", (Special quoteSpecial))]
+                                 ("quote", (Special quoteSpecial)),
+                                 ("list", (Fn $ pure . PList))]
   
 
 exceptT :: Monad m => Either e a -> ExceptT e m a
