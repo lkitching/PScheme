@@ -60,15 +60,18 @@ applyFnM f exprs = do
 failEval :: EvalError -> Eval a
 failEval err = lift $ exceptT $ Left err
 
+withEnv :: Env PValue -> Eval a -> Eval a
+withEnv env = local (const env)
+
 applyOpM :: PValue -> [Expr] -> Eval PValue
 applyOpM (Fn f) exprs = applyFnM f exprs
 applyOpM (Special f) exprs = f exprs
 applyOpM (Closure cEnv paramNames body) argExprs = do
   args <- traverse eval argExprs
   if (length paramNames) == (length args) then do
-    argFrame <- liftIO $ mapToFrame $  M.fromList (zip paramNames args)
+    argFrame <- liftIO $ mapToFrame $ M.fromList (zip paramNames args)
     let env' = pushEnv argFrame cEnv
-    local (const env') (eval body)
+    withEnv env' (eval body)
   else failEval $ ArityError (length paramNames) (length args)  
 applyOpM _ _ = failEval OperatorRequired
 
@@ -131,7 +134,7 @@ letSpecial exprs = failEval $ FormError "let form requires binding list and expr
 
 evalNamed :: Env PValue -> (String, Expr) -> Eval (String, PValue)
 evalNamed env (name, expr) = do
-  val <- local (const env) (eval expr)
+  val <- withEnv env (eval expr)
   pure (name, val)
   
 letrecSpecial :: [Expr] -> Eval PValue
@@ -146,7 +149,7 @@ letrecSpecial [bindingsExpr, body] = do
 
   --re-write temp bindings
   liftIO $ traverse_ (setBinding tmpEnv) vals
-  local (const tmpEnv) (eval body)
+  withEnv tmpEnv (eval body)
   
 letStarSpecial :: [Expr] -> Eval PValue
 letStarSpecial [bindingsExpr, body] = do
@@ -155,12 +158,12 @@ letStarSpecial [bindingsExpr, body] = do
   frameMapping <- foldM (accBindings env) M.empty bindingValues
   frame <- liftIO $ mapToFrame frameMapping
   let newEnv = pushEnv frame env
-  local (const newEnv) (eval body) where
+  withEnv newEnv (eval body) where
     accBindings :: Env PValue -> M.Map String PValue -> (String, Expr) -> Eval (M.Map String PValue)
     accBindings baseEnv accMappings (name, expr) = do
       frame <- liftIO $ mapToFrame $ accMappings
       let env = pushEnv frame baseEnv
-      val <- local (const env) (eval expr)
+      val <- withEnv env (eval expr)
       return $ M.insert name val accMappings
     
 letStarSpecial exprs = failEval $ FormError "let* requires binding list followed by a body" exprs
