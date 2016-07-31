@@ -20,6 +20,7 @@ data EvalError =
   | FormError String [Expr]
   | ArityError Int Int
   | DerefUndefinedError
+  | ListError String
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
@@ -28,6 +29,7 @@ instance Show EvalError where
   show (FormError msg form) = "Invalid form: " ++ msg
   show (ArityError expected actual) = "Wrong number of arguments (" ++ (show actual) ++ "). Expected: " ++ (show expected)
   show DerefUndefinedError = "Cannot evaluate undefined"
+  show (ListError msg) = "List error: " ++ msg
 
 data PValue =
     PNumber Integer
@@ -183,6 +185,27 @@ lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list 
 quoteSpecial :: [Expr] -> Eval PValue
 quoteSpecial [e] = pure $ Quoted e
 quoteSpecial exprs = failEval $ FormError "expected single expression to quote." exprs
+
+expectList :: PValue -> Either EvalError [PValue]
+expectList v = case v of
+  (PList l) -> pure l
+  _ -> Left $ TypeError "list" v
+  
+carFn :: [PValue] -> EvalResult
+carFn [v] = do
+  l <- expectList v
+  case l of
+    [] -> Left $ ListError $ "Empty list"
+    (x:_) -> Right x
+carFn vs = Left $ ArityError 1 (length vs)
+
+cdrFn :: [PValue] -> EvalResult
+cdrFn [v] = do
+  l <- expectList v
+  case l of
+    [] -> Left $ ListError $ "Empty list"
+    (_:xs) -> Right $ PList xs
+cdrFn vs = Left $ ArityError 1 (length vs)  
   
 defaultEnv :: IO (Env PValue)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
@@ -194,7 +217,9 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("letrec", (Special letrecSpecial)),
                                  ("lambda", (Special lambdaSpecial)),
                                  ("quote", (Special quoteSpecial)),
-                                 ("list", (Fn $ pure . PList))]
+                                 ("list", (Fn $ pure . PList)),
+                                 ("car", (Fn carFn)),
+                                 ("cdr", (Fn cdrFn))]
   
 
 exceptT :: Monad m => Either e a -> ExceptT e m a
