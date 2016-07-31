@@ -5,6 +5,7 @@ import PScheme.Env
 import Data.Traversable (sequence)
 import Data.Foldable (traverse_)
 import Control.Applicative (liftA2)
+import Control.Monad (foldM)
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (liftIO, MonadIO)
@@ -147,6 +148,22 @@ letrecSpecial [bindingsExpr, body] = do
   liftIO $ traverse_ (setBinding tmpEnv) vals
   local (const tmpEnv) (eval body)
   
+letStarSpecial :: [Expr] -> Eval PValue
+letStarSpecial [bindingsExpr, body] = do
+  bindingValues <- (listOf (pairOf symbolExpr anyExpr)) bindingsExpr
+  env <- ask
+  frameMapping <- foldM (accBindings env) M.empty bindingValues
+  frame <- liftIO $ mapToFrame frameMapping
+  let newEnv = pushEnv frame env
+  local (const newEnv) (eval body) where
+    accBindings :: Env PValue -> M.Map String PValue -> (String, Expr) -> Eval (M.Map String PValue)
+    accBindings baseEnv accMappings (name, expr) = do
+      frame <- liftIO $ mapToFrame $ accMappings
+      let env = pushEnv frame baseEnv
+      val <- local (const env) (eval expr)
+      return $ M.insert name val accMappings
+    
+letStarSpecial exprs = failEval $ FormError "let* requires binding list followed by a body" exprs
 
 lambdaSpecial :: [Expr] -> Eval PValue
 lambdaSpecial [params, body] = do
@@ -161,6 +178,7 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("*", (Fn $ arithFn product)),
                                  ("if", (Special ifSpecial)),
                                  ("let", (Special letSpecial)),
+                                 ("let*", (Special letStarSpecial)),
                                  ("letrec", (Special letrecSpecial)),
                                  ("lambda", (Special lambdaSpecial))]
   
