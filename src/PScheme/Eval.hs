@@ -1,8 +1,7 @@
 module PScheme.Eval where
 
-import PScheme.Reader (Expr(..))
+import PScheme.Reader
 import PScheme.Env
-import Data.List (intercalate)
 import Data.Traversable (sequence)
 import Data.Foldable (traverse_)
 import Control.Applicative (liftA2)
@@ -13,53 +12,12 @@ import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Except
 
-data EvalError =
-    UnboundSymbol String
-  | OperatorRequired
-  | TypeError String PValue
-  | FormError String [Expr]
-  | ArityError Int Int
-  | DerefUndefinedError
-  | ListError String
-
-instance Show EvalError where
-  show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
-  show OperatorRequired = "Operator required"
-  show (TypeError ty value) = "Unexpected type for " ++ (show value) ++ ": required " ++ ty
-  show (FormError msg form) = "Invalid form: " ++ msg
-  show (ArityError expected actual) = "Wrong number of arguments (" ++ (show actual) ++ "). Expected: " ++ (show expected)
-  show DerefUndefinedError = "Cannot evaluate undefined"
-  show (ListError msg) = "List error: " ++ msg
-
-data PValue =
-    PNumber Integer
-  | PStr String
-  | PList [PValue]
-  | Undefined
-  | Quoted Expr
-  | Fn ([PValue] -> EvalResult)
-  | Closure (Env PValue) [String] Expr
-  | Special ([Expr] -> Eval PValue)
-
-instance Show PValue where
-  show (PNumber i) = show i
-  show (PStr s) = s
-  show (PList vals) = "(" ++ (intercalate " " (map show vals)) ++ ")"
-  show Undefined = "<undefined>"
-  show (Fn _) = "<function>"
-  show (Closure _ _ _) = "<closure>"
-  show (Special _) = "<special>"
-  show (Quoted expr) = show expr
-
-isTruthy :: PValue -> Bool
-isTruthy (PNumber 0) = False
-isTruthy (PStr "") = False
+isTruthy :: Value -> Bool
+isTruthy (Number 0) = False
+isTruthy (Str "") = False
 isTruthy _ = True
 
-type EvalResult = Either EvalError PValue
-type Eval a = ReaderT (Env PValue) (ExceptT EvalError IO) a
-
-applyFnM :: ([PValue] -> EvalResult) -> [Expr] -> Eval PValue
+applyFnM :: ([Value] -> EvalResult) -> [Value] -> Eval Value
 applyFnM f exprs = do
   vals <- traverse eval exprs
   lift $ exceptT $ f vals
@@ -67,10 +25,10 @@ applyFnM f exprs = do
 failEval :: EvalError -> Eval a
 failEval err = lift $ exceptT $ Left err
 
-withEnv :: Env PValue -> Eval a -> Eval a
+withEnv :: Env Value -> Eval a -> Eval a
 withEnv env = local (const env)
 
-applyOpM :: PValue -> [Expr] -> Eval PValue
+applyOpM :: Value -> [Value] -> Eval Value
 applyOpM (Fn f) exprs = applyFnM f exprs
 applyOpM (Special f) exprs = f exprs
 applyOpM (Closure cEnv paramNames body) argExprs = do
@@ -80,40 +38,40 @@ applyOpM (Closure cEnv paramNames body) argExprs = do
     let env' = pushEnv argFrame cEnv
     withEnv env' (eval body)
   else failEval $ ArityError (length paramNames) (length args)  
-applyOpM _ _ = failEval OperatorRequired
+applyOpM v _ = failEval $ TypeError "applyable" v
 
-expectNum :: PValue -> Either EvalError Integer
-expectNum (PNumber i) = Right i
+expectNum :: Value -> Either EvalError Integer
+expectNum (Number i) = Right i
 expectNum v = Left $ TypeError "Number" v
 
-arithFn :: ([Integer] -> Integer) -> [PValue] -> EvalResult
+arithFn :: ([Integer] -> Integer) -> [Value] -> EvalResult
 arithFn f vs = do
   nums <- traverse expectNum vs
-  return $ PNumber $ f nums
+  return $ Number $ f nums
 
-plusFn :: [PValue] -> EvalResult
+plusFn :: [Value] -> EvalResult
 plusFn = arithFn sum
 
-minusFn :: [PValue] -> EvalResult
+minusFn :: [Value] -> EvalResult
 minusFn = arithFn sub where
   sub [] = 0
   sub [i] = negate i
   sub ls = foldl1 (-) ls
 
-ifSpecial :: [Expr] -> Eval PValue
+ifSpecial :: [Value] -> Eval Value
 ifSpecial [test, ifTrue, ifFalse] = do
   b <- eval test
   eval (if (isTruthy b) then ifTrue else ifFalse)
 ifSpecial exprs = failEval $ FormError "if form requires test ifTrue and ifFalse expressions" exprs
 
-type ExprEval a = Expr -> Eval a
+type ExprEval a = Value -> Eval a
 
 symbolExpr :: ExprEval String
 symbolExpr (Symbol s) = pure s
 symbolExpr e = failEval $ FormError "expected symbol" [e]
 
-listSchema :: ExprEval [Expr]
-listSchema (List es) = pure es
+listSchema :: ExprEval [Value]
+listSchema (PList es) = pure es
 listSchema e = failEval $ FormError "expected list" [e]
 
 listOf :: (ExprEval a) -> (ExprEval [a])
@@ -126,25 +84,25 @@ pairOf fs ss e = do
     [fe, se] -> liftA2 (,) (fs fe) (ss se)
     _ -> failEval $ FormError "expected pair" l
 
-valueOf :: (ExprEval PValue)
+valueOf :: (ExprEval Value)
 valueOf = eval
 
-anyExpr :: ExprEval Expr
+anyExpr :: ExprEval Value
 anyExpr = pure
   
-letSpecial :: [Expr] -> Eval PValue
+letSpecial :: [Value] -> Eval Value
 letSpecial [bindingExpr, body] = do
   bindingValues <-  (listOf (pairOf symbolExpr valueOf)) bindingExpr
   ef <- liftIO $ mapToFrame $ M.fromList bindingValues
   local (pushEnv ef) (eval body)
 letSpecial exprs = failEval $ FormError "let form requires binding list and expression to evaluate" exprs
 
-evalNamed :: Env PValue -> (String, Expr) -> Eval (String, PValue)
+evalNamed :: Env Value -> (String, Value) -> Eval (String, Value)
 evalNamed env (name, expr) = do
   val <- withEnv env (eval expr)
   pure (name, val)
   
-letrecSpecial :: [Expr] -> Eval PValue
+letrecSpecial :: [Value] -> Eval Value
 letrecSpecial [bindingsExpr, body] = do
   bindingValues <- (listOf (pairOf symbolExpr anyExpr)) bindingsExpr
   --temporarily bind expressions to Unbound
@@ -158,7 +116,7 @@ letrecSpecial [bindingsExpr, body] = do
   liftIO $ traverse_ (setBinding tmpEnv) vals
   withEnv tmpEnv (eval body)
   
-letStarSpecial :: [Expr] -> Eval PValue
+letStarSpecial :: [Value] -> Eval Value
 letStarSpecial [bindingsExpr, body] = do
   bindingValues <- (listOf (pairOf symbolExpr anyExpr)) bindingsExpr
   env <- ask
@@ -166,7 +124,7 @@ letStarSpecial [bindingsExpr, body] = do
   frame <- liftIO $ mapToFrame frameMapping
   let newEnv = pushEnv frame env
   withEnv newEnv (eval body) where
-    accBindings :: Env PValue -> M.Map String PValue -> (String, Expr) -> Eval (M.Map String PValue)
+    accBindings :: Env Value -> M.Map String Value -> (String, Value) -> Eval (M.Map String Value)
     accBindings baseEnv accMappings (name, expr) = do
       frame <- liftIO $ mapToFrame $ accMappings
       let env = pushEnv frame baseEnv
@@ -175,23 +133,23 @@ letStarSpecial [bindingsExpr, body] = do
     
 letStarSpecial exprs = failEval $ FormError "let* requires binding list followed by a body" exprs
 
-lambdaSpecial :: [Expr] -> Eval PValue
+lambdaSpecial :: [Value] -> Eval Value
 lambdaSpecial [params, body] = do
   paramNames <- listOf symbolExpr params
   env <- ask
   pure $ Closure env paramNames body
 lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs
 
-quoteSpecial :: [Expr] -> Eval PValue
-quoteSpecial [e] = pure $ Quoted e
+quoteSpecial :: [Value] -> Eval Value
+quoteSpecial [e] = pure e
 quoteSpecial exprs = failEval $ FormError "expected single expression to quote." exprs
 
-expectList :: PValue -> Either EvalError [PValue]
+expectList :: Value -> Either EvalError [Value]
 expectList v = case v of
   (PList l) -> pure l
   _ -> Left $ TypeError "list" v
   
-carFn :: [PValue] -> EvalResult
+carFn :: [Value] -> EvalResult
 carFn [v] = do
   l <- expectList v
   case l of
@@ -199,7 +157,7 @@ carFn [v] = do
     (x:_) -> Right x
 carFn vs = Left $ ArityError 1 (length vs)
 
-cdrFn :: [PValue] -> EvalResult
+cdrFn :: [Value] -> EvalResult
 cdrFn [v] = do
   l <- expectList v
   case l of
@@ -207,7 +165,7 @@ cdrFn [v] = do
     (_:xs) -> Right $ PList xs
 cdrFn vs = Left $ ArityError 1 (length vs)  
   
-defaultEnv :: IO (Env PValue)
+defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("-", (Fn minusFn)),
                                  ("*", (Fn $ arithFn product)),
@@ -226,21 +184,23 @@ exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
 exceptT (Right v) = return v
 
-eval :: Expr -> Eval PValue
+eval :: Value -> Eval Value
 eval expr = case expr of
-  Number i -> return $ PNumber i
-  Str s -> return $ PStr s
+  Number i -> pure expr
+  Str s -> pure expr
   Symbol s -> do
     env <- ask
     var <- liftIO $ envLookup s env
     case var of
       Just v -> return v
       Nothing -> lift $ throwE (UnboundSymbol s)
-  List l -> case l of
-    [] -> lift $ throwE OperatorRequired
+  PList l -> case l of
+    [] -> pure expr
     e:es -> do
       first <- eval e
       applyOpM first es
+  Undefined -> failEval DerefUndefinedError
+  _ -> pure expr
 
-runEval :: Env PValue -> Eval a -> IO (Either EvalError a)
+runEval :: Env Value -> Eval a -> IO (Either EvalError a)
 runEval env e = runExceptT $ runReaderT e env

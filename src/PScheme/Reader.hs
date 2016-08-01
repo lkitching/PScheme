@@ -1,20 +1,62 @@
 module PScheme.Reader (
   runRead,
   readExpr,
-  Expr(..),
+  Value(..),
   ReadError(..),
+  Eval,
+  EvalError(..),
+  EvalResult
   ) where
 
 import Data.Char (isSpace, isDigit)
 import Control.Monad
 import Control.Applicative
 import Data.Maybe (listToMaybe)
+import Data.List (intercalate)
+import Control.Monad.Trans.Reader (ReaderT)
+import Control.Monad.Trans.Except (ExceptT)
+import PScheme.Env (Env)
 
-data Expr =
-    Symbol String
-  | Number Integer
+data EvalError =
+    UnboundSymbol String
+  | OperatorRequired
+  | TypeError String Value
+  | FormError String [Value]
+  | ArityError Int Int
+  | DerefUndefinedError
+  | ListError String
+
+instance Show EvalError where
+  show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
+  show OperatorRequired = "Operator required"
+  show (TypeError ty value) = "Unexpected type for " ++ (show value) ++ ": required " ++ ty
+  show (FormError msg form) = "Invalid form: " ++ msg
+  show (ArityError expected actual) = "Wrong number of arguments (" ++ (show actual) ++ "). Expected: " ++ (show expected)
+  show DerefUndefinedError = "Cannot evaluate undefined"
+  show (ListError msg) = "List error: " ++ msg
+
+data Value =
+    Number Integer
   | Str String
-  | List [Expr] deriving (Show)
+  | Symbol String
+  | PList [Value]
+  | Undefined
+  | Fn ([Value] -> EvalResult)
+  | Closure (Env Value) [String] Value
+  | Special ([Value] -> Eval Value)
+
+instance Show Value where
+  show (Number i) = show i
+  show (Str s) = "\"" ++ s ++ "\""
+  show (Symbol s) = s
+  show (PList vals) = "(" ++ (intercalate " " (map show vals)) ++ ")"
+  show Undefined = "<undefined>"
+  show (Fn _) = "<function>"
+  show (Closure _ _ _) = "<closure>"
+  show (Special _) = "<special>"
+
+type EvalResult = Either EvalError Value
+type Eval a = ReaderT (Env Value) (ExceptT EvalError IO) a
 
 data ReadError =
     Incomplete
@@ -74,10 +116,10 @@ readStringContents = do
   expectChar '"'
   return s
 
-readStringExpr :: Reader Expr
+readStringExpr :: Reader Value
 readStringExpr = fmap Str readStringContents
 
-tryReadListExpr :: Reader (Maybe Expr)
+tryReadListExpr :: Reader (Maybe Value)
 tryReadListExpr = do
   whitespace
   c <- peekOne
@@ -85,15 +127,15 @@ tryReadListExpr = do
     ')' -> consumeNext >> return Nothing
     _ -> fmap Just readExpr
 
-readListExprs :: Reader [Expr]
+readListExprs :: Reader [Value]
 readListExprs = do
   m <- tryReadListExpr
   case m of
     Nothing -> return []
     Just e -> readListExprs >>= \l -> return (e:l)
 
-readListExpr :: Reader Expr
-readListExpr = fmap List readListExprs
+readListExpr :: Reader Value
+readListExpr = fmap PList readListExprs
 
 isDelimiter :: Char -> Bool
 isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"'
@@ -106,7 +148,7 @@ tryReadNumber s = case (reads s) of
 readNumber :: Reader Integer
 readNumber = R $ \s -> let (i, rest) = span (not . isDelimiter) s in (rest, tryReadNumber i)
 
-readNumberOrSym :: Char -> (Integer -> Integer) -> Reader Expr
+readNumberOrSym :: Char -> (Integer -> Integer) -> Reader Value
 readNumberOrSym prefix modifier = do
   mNext <- peek
   case mNext of
@@ -114,7 +156,7 @@ readNumberOrSym prefix modifier = do
     Just c | isDelimiter c -> return (Symbol [prefix])
     _ -> fmap (Number . modifier) readNumber
   
-readExpr :: Reader Expr
+readExpr :: Reader Value
 readExpr = do
   whitespace
   c <- peekOne
@@ -125,5 +167,3 @@ readExpr = do
     '-' -> consumeNext >> (readNumberOrSym '-' negate)
     n | isDigit n -> fmap Number readNumber
     _ -> fmap Symbol (readUntil isDelimiter)
-  
-
