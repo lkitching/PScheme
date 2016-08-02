@@ -144,19 +144,12 @@ lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list 
 quoteSpecial :: [Value] -> Eval Value
 quoteSpecial [e] = pure e
 quoteSpecial exprs = failEval $ FormError "expected single expression to quote." exprs
-
-expectList :: Value -> Either EvalError [Value]
-expectList v = case v of
-  Nil -> pure []
-  (Cons hd tl) -> pure $ consToList hd tl
-  _ -> Left $ TypeError "list" v
   
 carFn :: [Value] -> EvalResult
-carFn [v] = do
-  l <- expectList v
-  case l of
-    [] -> Left $ ListError $ "Empty list"
-    (x:_) -> Right x
+carFn [v] = case v of
+  Nil -> Left $ ListError $ "Empty list"
+  (Cons hd _) -> pure hd
+  _ -> Left $ TypeError "list" v
 carFn vs = Left $ ArityError 1 (length vs)
 
 listToCons :: [Value] -> Value
@@ -164,11 +157,10 @@ listToCons [] = Nil
 listToCons (x:xs) = Cons x (listToCons xs)
 
 cdrFn :: [Value] -> EvalResult
-cdrFn [v] = do
-  l <- expectList v
-  case l of
-    [] -> Left $ ListError $ "Empty list"
-    (_:xs) -> Right $ listToCons xs
+cdrFn [v] = case v of
+  Nil -> Left $ ListError $ "Empty list"
+  (Cons _ tl) -> Right tl
+  _ -> Left $ TypeError "list" v
 cdrFn vs = Left $ ArityError 1 (length vs)  
   
 defaultEnv :: IO (Env Value)
@@ -203,7 +195,7 @@ eval expr = case expr of
   Nil -> pure expr
   (Cons hd tl) -> do
     first <- eval hd
-    applyOpM first (tail $ consToList first tl)
+    applyOpM first (values tl)
   Undefined -> failEval DerefUndefinedError
   _ -> pure expr
 

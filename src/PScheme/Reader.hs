@@ -6,7 +6,8 @@ module PScheme.Reader (
   Eval,
   EvalError(..),
   EvalResult,
-  consToList
+  consToList,
+  values
   ) where
 
 import Data.Char (isSpace, isDigit)
@@ -47,18 +48,20 @@ data Value =
   | Closure (Env Value) [String] Value
   | Special ([Value] -> Eval Value)
 
+values :: Value -> [Value]
+values Nil = []
+values (Cons hd tl) = hd:(values tl)
+values e = [e]
+
 consToList :: Value -> Value -> [Value]
-consToList hd tl = hd:(accList tl) where
-  accList (Cons hd Nil) = [hd]
-  accList (Cons hd tl) = hd:(accList tl)
-  accList v = [v]
+consToList hd tl = hd:(values tl)
 
 instance Show Value where
   show (Number i) = show i
   show (Str s) = "\"" ++ s ++ "\""
   show (Symbol s) = s
   show Nil = "()"
-  show (Cons hd tl) = "(" ++ (intercalate " " (map show (consToList hd tl))) ++ ")"
+  show (Cons hd tl) = "(" ++ (intercalate " " (map show (hd:(values tl)))) ++ ")"
   show Undefined = "<undefined>"
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
