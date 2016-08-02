@@ -15,6 +15,7 @@ import Control.Monad.Trans.Except
 isTruthy :: Value -> Bool
 isTruthy (Number 0) = False
 isTruthy (Str "") = False
+isTruthy Nil = False
 isTruthy _ = True
 
 applyFnM :: ([Value] -> EvalResult) -> [Value] -> Eval Value
@@ -59,6 +60,7 @@ minusFn = arithFn sub where
   sub ls = foldl1 (-) ls
 
 ifSpecial :: [Value] -> Eval Value
+ifSpecial [test, ifTrue] = ifSpecial [test, ifTrue, Nil]             
 ifSpecial [test, ifTrue, ifFalse] = do
   b <- eval test
   eval (if (isTruthy b) then ifTrue else ifFalse)
