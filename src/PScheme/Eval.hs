@@ -88,8 +88,8 @@ pairOf fs ss e = do
 valueOf :: (ExprEval Value)
 valueOf = eval
 
-anyExpr :: ExprEval Value
-anyExpr = pure
+anyVal :: ExprEval Value
+anyVal = pure
   
 letSpecial :: [Value] -> Eval Value
 letSpecial [bindingExpr, body] = do
@@ -105,7 +105,7 @@ evalNamed env (name, expr) = do
   
 letrecSpecial :: [Value] -> Eval Value
 letrecSpecial [bindingsExpr, body] = do
-  bindingValues <- (listOf (pairOf symbolExpr anyExpr)) bindingsExpr
+  bindingValues <- (listOf (pairOf symbolExpr anyVal)) bindingsExpr
   --temporarily bind expressions to Unbound
   let tmpBindings = (fmap . fmap) (const Undefined) bindingValues
   tmpFrame <- liftIO $ mapToFrame $ M.fromList tmpBindings
@@ -119,7 +119,7 @@ letrecSpecial [bindingsExpr, body] = do
   
 letStarSpecial :: [Value] -> Eval Value
 letStarSpecial [bindingsExpr, body] = do
-  bindingValues <- (listOf (pairOf symbolExpr anyExpr)) bindingsExpr
+  bindingValues <- (listOf (pairOf symbolExpr anyVal)) bindingsExpr
   env <- ask
   frameMapping <- foldM (accBindings env) M.empty bindingValues
   frame <- liftIO $ mapToFrame frameMapping
@@ -161,7 +161,11 @@ cdrFn [v] = case v of
   Nil -> Left $ ListError $ "Empty list"
   (Cons _ tl) -> Right tl
   _ -> Left $ TypeError "list" v
-cdrFn vs = Left $ ArityError 1 (length vs)  
+cdrFn vs = Left $ ArityError 1 (length vs)
+
+consFn :: [Value] -> EvalResult
+consFn [f, s] = Right $ Cons f s
+consFn vs = Left $ ArityError 2 (length vs)
   
 defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
@@ -175,7 +179,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("quote", (Special quoteSpecial)),
                                  ("list", (Fn $ pure . listToCons)),
                                  ("car", (Fn carFn)),
-                                 ("cdr", (Fn cdrFn))]
+                                 ("cdr", (Fn cdrFn)),
+                                 ("cons", (Fn consFn))]
   
 
 exceptT :: Monad m => Either e a -> ExceptT e m a
