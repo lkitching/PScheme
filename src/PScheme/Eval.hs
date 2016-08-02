@@ -147,7 +147,7 @@ quoteSpecial exprs = failEval $ FormError "expected single expression to quote."
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
-  Nil -> Left $ ListError $ "Empty list"
+  Nil -> pure Nil
   (Cons hd _) -> pure hd
   _ -> Left $ TypeError "list" v
 carFn vs = Left $ ArityError 1 (length vs)
@@ -158,8 +158,8 @@ listToCons (x:xs) = Cons x (listToCons xs)
 
 cdrFn :: [Value] -> EvalResult
 cdrFn [v] = case v of
-  Nil -> Left $ ListError $ "Empty list"
-  (Cons _ tl) -> Right tl
+  Nil -> pure Nil
+  (Cons _ tl) -> pure tl
   _ -> Left $ TypeError "list" v
 cdrFn vs = Left $ ArityError 1 (length vs)
 
