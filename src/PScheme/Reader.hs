@@ -61,7 +61,9 @@ instance Show Value where
   show (Str s) = "\"" ++ s ++ "\""
   show (Symbol s) = s
   show Nil = "()"
-  show (Cons hd tl) = "(" ++ (intercalate " " (map show (hd:(values tl)))) ++ ")"
+  show (Cons v Nil) = "(" ++ (show v) ++ ")"
+  show (Cons hd tl@(Cons _ _)) =  "(" ++ (intercalate " " (map show (hd:(values tl)))) ++ ")"
+  show (Cons x y) = "(" ++ (show x) ++ " . " ++ (show y) ++ ")"
   show Undefined = "<undefined>"
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
