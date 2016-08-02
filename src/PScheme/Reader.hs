@@ -5,7 +5,8 @@ module PScheme.Reader (
   ReadError(..),
   Eval,
   EvalError(..),
-  EvalResult
+  EvalResult,
+  consToList
   ) where
 
 import Data.Char (isSpace, isDigit)
@@ -39,17 +40,25 @@ data Value =
     Number Integer
   | Str String
   | Symbol String
-  | PList [Value]
+  | Nil
+  | Cons Value Value
   | Undefined
   | Fn ([Value] -> EvalResult)
   | Closure (Env Value) [String] Value
   | Special ([Value] -> Eval Value)
 
+consToList :: Value -> Value -> [Value]
+consToList hd tl = hd:(accList tl) where
+  accList (Cons hd Nil) = [hd]
+  accList (Cons hd tl) = hd:(accList tl)
+  accList v = [v]
+
 instance Show Value where
   show (Number i) = show i
   show (Str s) = "\"" ++ s ++ "\""
   show (Symbol s) = s
-  show (PList vals) = "(" ++ (intercalate " " (map show vals)) ++ ")"
+  show Nil = "()"
+  show (Cons hd tl) = "(" ++ (intercalate " " (map show (consToList hd tl))) ++ ")"
   show Undefined = "<undefined>"
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
@@ -82,6 +91,9 @@ instance Monad Reader where
 instance Applicative Reader where
   pure = return
   (<*>) = ap
+
+failRead :: ReadError -> Reader ()
+failRead err = R $ \s -> (s, Left err)
 
 expectChar :: Char -> Reader ()
 expectChar c = R $ \s -> case s of
@@ -119,23 +131,22 @@ readStringContents = do
 readStringExpr :: Reader Value
 readStringExpr = fmap Str readStringContents
 
-tryReadListExpr :: Reader (Maybe Value)
-tryReadListExpr = do
+readListExpr :: Reader Value
+readListExpr = do
   whitespace
   c <- peekOne
   case c of
-    ')' -> consumeNext >> return Nothing
-    _ -> fmap Just readExpr
-
-readListExprs :: Reader [Value]
-readListExprs = do
-  m <- tryReadListExpr
-  case m of
-    Nothing -> return []
-    Just e -> readListExprs >>= \l -> return (e:l)
-
-readListExpr :: Reader Value
-readListExpr = fmap PList readListExprs
+    ')' -> consumeNext >> pure Nil
+    '.' -> do
+      consumeNext
+      last <- readExpr
+      whitespace
+      expectChar ')'
+      pure last
+    _ -> do
+      first <- readExpr
+      rest <- readListExpr
+      pure $ Cons first rest
 
 isDelimiter :: Char -> Bool
 isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"'
