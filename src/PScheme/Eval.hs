@@ -29,17 +29,25 @@ failEval err = lift $ exceptT $ Left err
 withEnv :: Env Value -> Eval a -> Eval a
 withEnv env = local (const env)
 
+tryBindArgs :: [String] -> [Value] -> Either EvalError (M.Map String Value)
+tryBindArgs syms args = bind syms args M.empty where
+  bind [] [] m = pure m
+  bind [s] [v] m = pure $ M.insert s v m
+  bind [s] vs m = pure $ M.insert s (listToCons vs) m
+  bind (_:_) [] _ = Left $ ArityError (length syms) (length args)
+  bind (s:ss) (v:vs) m = bind ss vs (M.insert s v m)
+  
 applyOpM :: Value -> [Value] -> Eval Value
 applyOpM (Fn f) exprs = applyFnM f exprs
 applyOpM (Special f) exprs = f exprs
 applyOpM (Closure cEnv paramNames body) argExprs = do
   args <- traverse eval argExprs
-  if (length paramNames) == (length args) then do
-    argFrame <- liftIO $ mapToFrame $ M.fromList (zip paramNames args)
-    let env' = pushEnv argFrame cEnv
-    withEnv env' (eval body)
-  else failEval $ ArityError (length paramNames) (length args)  
-applyOpM v _ = failEval $ TypeError "applyable" v
+  argMapping <- lift $ exceptT $ tryBindArgs paramNames argExprs
+  argFrame <- liftIO $ mapToFrame $ argMapping
+  let env' = pushEnv argFrame cEnv
+  withEnv env' (eval body)
+  
+applyOpM v _ = failEval $ TypeError "function" v
 
 expectNum :: Value -> Either EvalError Integer
 expectNum (Number i) = Right i
@@ -138,7 +146,8 @@ letStarSpecial exprs = failEval $ FormError "let* requires binding list followed
 
 lambdaSpecial :: [Value] -> Eval Value
 lambdaSpecial [params, body] = do
-  paramNames <- listOf symbolExpr params
+  let paramList = listToCons $ values params
+  paramNames <- listOf symbolExpr paramList
   env <- ask
   pure $ Closure env paramNames body
 lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs
