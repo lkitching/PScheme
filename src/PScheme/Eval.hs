@@ -36,16 +36,26 @@ tryBindArgs syms args = bind syms args M.empty where
   bind [s] vs m = pure $ M.insert s (listToCons vs) m
   bind (_:_) [] _ = Left $ ArityError (length syms) (length args)
   bind (s:ss) (v:vs) m = bind ss vs (M.insert s v m)
+
+paramsFrame :: [String] -> [Value] -> Eval (EnvFrame Value)
+paramsFrame paramNames values = do
+  argMapping <- lift $ exceptT $ tryBindArgs paramNames values
+  liftIO $ mapToFrame argMapping
   
 applyOpM :: Value -> [Value] -> Eval Value
 applyOpM (Fn f) exprs = applyFnM f exprs
 applyOpM (Special f) exprs = f exprs
 applyOpM (Closure cEnv paramNames body) argExprs = do
   args <- traverse eval argExprs
-  argMapping <- lift $ exceptT $ tryBindArgs paramNames argExprs
-  argFrame <- liftIO $ mapToFrame $ argMapping
+  argFrame <- paramsFrame paramNames args
   let env' = pushEnv argFrame cEnv
   withEnv env' (eval body)
+applyOpM (Macro cEnv paramNames body) argExprs = do
+  args <- traverse eval argExprs
+  argFrame <- paramsFrame paramNames args
+  let env' = pushEnv argFrame cEnv
+  newBody <- withEnv env' (eval body)
+  eval newBody
   
 applyOpM v _ = failEval $ TypeError "function" v
 
@@ -66,8 +76,7 @@ minusFn = arithFn sub where
   sub [] = 0
   sub [i] = negate i
   sub ls = foldl1 (-) ls
-
-ifSpecial :: [Value] -> Eval Value
+  
 ifSpecial [test, ifTrue] = ifSpecial [test, ifTrue, Nil]             
 ifSpecial [test, ifTrue, ifFalse] = do
   b <- eval test
@@ -155,6 +164,13 @@ lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list 
 quoteSpecial :: [Value] -> Eval Value
 quoteSpecial [e] = pure e
 quoteSpecial exprs = failEval $ FormError "expected single expression to quote." exprs
+
+macroSpecial :: [Value] -> Eval Value
+macroSpecial [params, body] = do
+  ps <- listOf symbolExpr params
+  env <- ask
+  pure $ Macro env ps body
+macroSpecial exprs = failEval $ FormError "macro form requires parameter list followed by body" exprs  
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
@@ -187,7 +203,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("list", (Fn $ pure . listToCons)),
                                  ("car", (Fn carFn)),
                                  ("cdr", (Fn cdrFn)),
-                                 ("cons", (Fn consFn))]
+                                 ("cons", (Fn consFn)),
+                                 ("macro", (Special macroSpecial))]
   
 
 exceptT :: Monad m => Either e a -> ExceptT e m a

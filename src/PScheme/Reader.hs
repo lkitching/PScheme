@@ -55,6 +55,7 @@ data Value =
   | Fn ([Value] -> EvalResult)
   | Closure (Env Value) [String] Value
   | Special ([Value] -> Eval Value)
+  | Macro (Env Value) [String] Value
 
 values :: Value -> [Value]
 values Nil = []
@@ -80,6 +81,7 @@ instance Show Value where
   show (Fn _) = "<function>"
   show (Closure _ _ _) = "<closure>"
   show (Special _) = "<special>"
+  show (Macro _ _ _) = "<macro>"
 
 type EvalResult = Either EvalError Value
 type Eval a = ReaderT (Env Value) (ExceptT EvalError IO) a
