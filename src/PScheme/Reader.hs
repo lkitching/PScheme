@@ -9,7 +9,16 @@ module PScheme.Reader (
   consToList,
   values,
   readToken,
-  readTokens
+  readTokens,
+  parseString,
+  listToCons,
+  ParseState(..),
+  Token,
+  ParseOutcome,
+  initOutcome,
+  parsedValue,
+  parseNext,
+  ParseResult,
   ) where
 
 import Data.Char (isSpace, isDigit, isNumber, isLetter)
@@ -55,6 +64,10 @@ values Nil = []
 values (Cons hd tl) = hd:(values tl)
 values e = [e]
 
+listToCons :: [Value] -> Value
+listToCons [] = Nil
+listToCons (x:xs) = Cons x (listToCons xs)
+
 consToList :: Value -> Value -> [Value]
 consToList hd tl = hd:(values tl)
 
@@ -79,7 +92,8 @@ data ReadError =
   | ExpectedChar Char
   | InvalidEscape Char
   | InvalidChar Char
-  | BadNumber String deriving (Show)
+  | BadNumber String
+  | UnbalancedParens deriving (Show)
 
 data Reader a = R (String -> (String, Either ReadError a))
 
@@ -291,3 +305,73 @@ readTokens s =
     Right Nothing -> Right []
     Right (Just token) -> fmap (token:) (readTokens rest)
 
+data ParseState =
+    Empty
+  | PartialList [Value] ParseState deriving (Show)
+  
+data ParseOutcome =
+    CompleteParse Value [Token]
+  | NoParse
+  | Moar ParseState deriving (Show)
+
+parsedValue :: ParseOutcome -> Maybe Value
+parsedValue (CompleteParse v _) = Just v
+parsedValue _ = Nothing
+
+type ParseResult = Either ReadError ParseOutcome
+
+atomTokenValue :: Token -> Value
+atomTokenValue (TNumber (Just Negative) str) = Number $ negate $ read str
+atomTokenValue (TNumber _ str) = Number $ read str
+atomTokenValue (TStr s) = Str s
+atomTokenValue (TSym s) = Symbol s
+atomTokenValue _ = error "!!!"
+
+emptyPartial :: ParseState
+emptyPartial = Empty
+
+isEmpty :: ParseState -> Bool
+isEmpty Empty = True
+isEmpty _ = False
+
+pushList :: ParseState -> ParseState
+pushList p = PartialList [] p
+
+popList :: ParseState -> Either ParseState Value
+popList (PartialList vs Empty) = Right $ listToCons $ reverse vs
+popList (PartialList vs inner) = Left $ appendPartial (listToCons $ reverse vs) inner
+
+appendPartial :: Value -> ParseState -> ParseState
+appendPartial _ Empty = error "Empty parse state"
+appendPartial v (PartialList vs inner) = PartialList (v:vs) inner
+
+parseFailed :: ReadError -> ParseResult
+parseFailed = Left
+
+parse' :: ParseState -> [Token] -> ParseResult
+parse' ps [] = Right $ Moar ps
+parse' ps (OpenParen:ts) = parse' (pushList ps) ts
+parse' Empty ts@(CloseParen:_) = parseFailed UnbalancedParens
+parse' Empty (t:ts) = Right $ CompleteParse (atomTokenValue t) ts
+parse' ps (CloseParen:ts) =
+  case (popList ps) of
+    Left ps' -> parse' ps' ts
+    Right v -> Right $ CompleteParse v ts
+parse' ps (t:ts) = parse' (appendPartial (atomTokenValue t) ps) ts
+
+parse :: [Token] -> ParseResult
+parse = parse' Empty
+
+initOutcome :: ParseOutcome
+initOutcome = NoParse
+
+parseNext :: ParseOutcome -> [Token] -> ParseResult
+parseNext (CompleteParse _ unreadToks) newToks = parse' Empty (unreadToks ++ newToks)
+parseNext NoParse tokens = parse' Empty tokens
+parseNext (Moar state) tokens = parse' state tokens
+
+parseString :: String -> ParseResult
+parseString s = case (readTokens s) of
+  (Left err) -> parseFailed err
+  Right tokens -> parse tokens
+  

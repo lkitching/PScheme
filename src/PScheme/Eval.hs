@@ -163,10 +163,6 @@ carFn [v] = case v of
   _ -> Left $ TypeError "list" v
 carFn vs = Left $ ArityError 1 (length vs)
 
-listToCons :: [Value] -> Value
-listToCons [] = Nil
-listToCons (x:xs) = Cons x (listToCons xs)
-
 cdrFn :: [Value] -> EvalResult
 cdrFn [v] = case v of
   Nil -> pure Nil
