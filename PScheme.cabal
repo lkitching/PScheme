@@ -15,7 +15,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     PScheme.Reader, PScheme.Eval, PScheme.Env
+  exposed-modules:     PScheme.Reader, PScheme.Eval, PScheme.Env, PScheme.Repl
   build-depends:       base >= 4.7 && < 5,
                        containers >= 0.5.6,
                        transformers >= 0.4.2

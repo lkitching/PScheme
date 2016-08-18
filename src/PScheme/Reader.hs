@@ -11,6 +11,7 @@ module PScheme.Reader (
   readToken,
   readTokens,
   parseString,
+  parse,
   listToCons,
   ParseState(..),
   Token,
