@@ -1,6 +1,8 @@
 module PScheme.Repl where
 
 import PScheme.Reader
+import PScheme.Eval
+import Control.Monad (forever)
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class (liftIO)
 import System.IO (hFlush, stdout)
@@ -10,10 +12,6 @@ data Prompt = InitPrompt | ContPrompt
 instance Show Prompt where
   show InitPrompt = "pscheme> "
   show ContPrompt = "       | "
-
-exceptT :: Monad m => Either e a -> ExceptT e m a
-exceptT (Left e) = throwE e
-exceptT (Right v) = return v
 
 tokenise :: Monad m => String -> ExceptT ReadError m [Token]
 tokenise = exceptT . readTokens
@@ -43,5 +41,13 @@ readOne = readNext Nothing
 
 evalOne :: IO ()
 evalOne = do
-  r <- runExceptT readOne
-  putStrLn $ either show show r
+  re <- runExceptT readOne
+  case re of
+    Left err -> print err
+    Right expr -> do
+      env <- defaultEnv
+      ve <- runEval env (eval expr)
+      putStrLn $ either show show ve
+
+repl :: IO ()
+repl = forever evalOne
