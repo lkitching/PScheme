@@ -150,7 +150,7 @@ appendNumChar c Minus = WithSign Negative (singleBuf c)
 appendNumChar c (WithSign sign buf) = WithSign sign (appendChar c buf)
 appendNumChar c (NoSign f buf) = NoSign f (appendChar c buf)
 
-isValidFollowingSymbolChar c = isLetter c
+isValidFollowingSymbolChar c = True
 
 readToken' :: PartialToken -> String -> (String, Either ReadError (Maybe Token))
 readToken' None [] = ([], Right Nothing)
