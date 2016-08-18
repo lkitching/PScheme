@@ -1,6 +1,4 @@
 module PScheme.Reader (
-  runRead,
-  readExpr,
   Value(..),
   ReadError(..),
   Eval,
@@ -8,18 +6,16 @@ module PScheme.Reader (
   EvalResult,
   consToList,
   values,
-  readToken,
   readTokens,
   parseString,
-  parse,
   listToCons,
   ParseState(..),
   Token,
   ParseOutcome,
-  initOutcome,
-  parsedValue,
-  parseNext,
   ParseResult,
+  parse,
+  parseNext,
+  parsedValue
   ) where
 
 import Data.Char (isSpace, isDigit, isNumber, isLetter)
@@ -96,112 +92,8 @@ data ReadError =
   | BadNumber String
   | UnbalancedParens deriving (Show)
 
-data Reader a = R (String -> (String, Either ReadError a))
-
-runRead :: String -> Reader a -> (String, Either ReadError a)
-runRead s (R rf) = rf s
-
-instance Functor Reader where
-  fmap f (R r) = R $ (fmap . fmap . fmap) f r
-
-instance Monad Reader where
-  return x = R $ \s -> (s, pure x)
-  r >>= bf = R $ \s ->
-    let (s', result) = runRead s r
-    in case result of
-      (Left e) -> (s', Left e)
-      (Right res) -> runRead s' (bf res)
-
-instance Applicative Reader where
-  pure = return
-  (<*>) = ap
-
-failRead :: ReadError -> Reader a
-failRead err = R $ \s -> (s, Left err)
-
-expectChar :: Char -> Reader ()
-expectChar c = R $ \s -> case s of
-  (a:cs) | c == a -> (cs, Right ())
-  _ -> (s, Left $ ExpectedChar c)
-
-peek :: Reader (Maybe Char)
-peek = R $ \s -> (s, Right $ listToMaybe s)
-
-peekOne :: Reader Char
-peekOne = R $ \s -> case s of
-  [] -> (s, Left Incomplete)
-  c:_ -> (s, Right c)
-
-consumeNext :: Reader ()
-consumeNext = R $ \s -> case s of
-  [] -> (s, Left Incomplete)
-  c:cs -> (cs, Right ())
-
-readWhile :: (Char -> Bool) -> Reader String
-readWhile p = R $ \s -> let (str, rest) = span p s in (rest, Right str)
-
-readUntil :: (Char -> Bool) -> Reader String
-readUntil p = readWhile (not . p)
-
-whitespace :: Reader ()
-whitespace = R $ \s -> let r = dropWhile isSpace s in (r, Right ())
-
-readStringContents :: Reader String
-readStringContents = do
-  s <- readWhile (/= '"')
-  expectChar '"'
-  return s
-
-readStringExpr :: Reader Value
-readStringExpr = fmap Str readStringContents
-
-readListExpr :: Reader Value
-readListExpr = do
-  whitespace
-  c <- peekOne
-  case c of
-    ')' -> consumeNext >> pure Nil
-    '.' -> do
-      consumeNext
-      last <- readExpr
-      whitespace
-      expectChar ')'
-      pure last
-    _ -> do
-      first <- readExpr
-      rest <- readListExpr
-      pure $ Cons first rest
-
 isDelimiter :: Char -> Bool
 isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"'
-
-tryReadNumber :: String -> Either ReadError Integer
-tryReadNumber s = case (reads s) of
-  [(i, "")] -> Right i
-  _ -> Left (BadNumber s)
-  
-readNumber :: Reader Integer
-readNumber = R $ \s -> let (i, rest) = span (not . isDelimiter) s in (rest, tryReadNumber i)
-
-readNumberOrSym :: Char -> (Integer -> Integer) -> Reader Value
-readNumberOrSym prefix modifier = do
-  mNext <- peek
-  case mNext of
-    Nothing -> return (Symbol [prefix])
-    Just c | isDelimiter c -> return (Symbol [prefix])
-    _ -> fmap (Number . modifier) readNumber
-  
-readExpr :: Reader Value
-readExpr = do
-  whitespace
-  c <- peekOne
-  case c of
-    '"' -> consumeNext >> readStringExpr
-    '(' -> consumeNext >> readListExpr
-    '+' -> consumeNext >> (readNumberOrSym '+' id)
-    '-' -> consumeNext >> (readNumberOrSym '-' negate)
-    n | isDigit n -> fmap Number readNumber
-    _ -> fmap Symbol (readUntil isDelimiter)
 
 data NumSign = Positive | Negative deriving (Show)
 data Token =
@@ -312,7 +204,6 @@ data ParseState =
   
 data ParseOutcome =
     CompleteParse Value [Token]
-  | NoParse
   | Moar ParseState deriving (Show)
 
 parsedValue :: ParseOutcome -> Maybe Value
@@ -363,12 +254,8 @@ parse' ps (t:ts) = parse' (appendPartial (atomTokenValue t) ps) ts
 parse :: [Token] -> ParseResult
 parse = parse' Empty
 
-initOutcome :: ParseOutcome
-initOutcome = NoParse
-
 parseNext :: ParseOutcome -> [Token] -> ParseResult
 parseNext (CompleteParse _ unreadToks) newToks = parse' Empty (unreadToks ++ newToks)
-parseNext NoParse tokens = parse' Empty tokens
 parseNext (Moar state) tokens = parse' state tokens
 
 parseString :: String -> ParseResult
