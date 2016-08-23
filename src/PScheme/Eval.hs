@@ -51,8 +51,7 @@ applyOpM (Closure cEnv paramNames body) argExprs = do
   let env' = pushEnv argFrame cEnv
   withEnv env' (eval body)
 applyOpM (Macro cEnv paramNames body) argExprs = do
-  args <- traverse eval argExprs
-  argFrame <- paramsFrame paramNames args
+  argFrame <- paramsFrame paramNames argExprs
   let env' = pushEnv argFrame cEnv
   newBody <- withEnv env' (eval body)
   eval newBody
