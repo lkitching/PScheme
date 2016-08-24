@@ -41,22 +41,6 @@ paramsFrame :: [String] -> [Value] -> Eval (EnvFrame Value)
 paramsFrame paramNames values = do
   argMapping <- lift $ exceptT $ tryBindArgs paramNames values
   liftIO $ mapToFrame argMapping
-  
-applyOpM :: Value -> [Value] -> Eval Value
-applyOpM (Fn f) exprs = applyFnM f exprs
-applyOpM (Special f) exprs = f exprs
-applyOpM (Closure cEnv paramNames body) argExprs = do
-  args <- traverse eval argExprs
-  argFrame <- paramsFrame paramNames args
-  let env' = pushEnv argFrame cEnv
-  withEnv env' (eval body)
-applyOpM (Macro cEnv paramNames body) argExprs = do
-  argFrame <- paramsFrame paramNames argExprs
-  let env' = pushEnv argFrame cEnv
-  newBody <- withEnv env' (eval body)
-  eval newBody
-  
-applyOpM v _ = failEval $ TypeError "function" v
 
 expectNum :: Value -> Either EvalError Integer
 expectNum (Number i) = Right i
@@ -81,6 +65,24 @@ ifSpecial [test, ifTrue, ifFalse] = do
   b <- eval test
   eval (if (isTruthy b) then ifTrue else ifFalse)
 ifSpecial exprs = failEval $ FormError "if form requires test ifTrue and ifFalse expressions" exprs
+
+car :: Value -> Eval Value
+car Nil = pure Nil
+car (Cons h _) = pure h
+car v = failEval $ TypeError "list" v
+
+uncons :: Value -> Eval (Value, Value)
+uncons Nil = pure (Nil, Nil)
+uncons (Cons h tl) = pure (h, tl)
+uncons v = failEval $ TypeError "list" v
+
+ifSpecial2 :: Value -> Eval Value
+ifSpecial2 v = do
+  (test, t) <- uncons v
+  (ifTrue, t) <- uncons t
+  (ifFalse, _) <- uncons t
+  b <- eval test
+  eval (if (isTruthy b) then ifTrue else ifFalse)
 
 type ExprEval a = Value -> Eval a
 
@@ -116,6 +118,12 @@ letSpecial [bindingExpr, body] = do
   local (pushEnv ef) (eval body)
 letSpecial exprs = failEval $ FormError "let form requires binding list and expression to evaluate" exprs
 
+letSpecial2 :: Value -> Eval Value
+letSpecial2 l = do
+  (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr valueOf)) anyVal l
+  ef <- liftIO $ mapToFrame $ M.fromList bindingValues
+  local (pushEnv ef) (eval body)
+
 evalNamed :: Env Value -> (String, Value) -> Eval (String, Value)
 evalNamed env (name, expr) = do
   val <- withEnv env (eval expr)
@@ -124,6 +132,20 @@ evalNamed env (name, expr) = do
 letrecSpecial :: [Value] -> Eval Value
 letrecSpecial [bindingsExpr, body] = do
   bindingValues <- (listOf (pairOf symbolExpr anyVal)) bindingsExpr
+  --temporarily bind expressions to Unbound
+  let tmpBindings = (fmap . fmap) (const Undefined) bindingValues
+  tmpFrame <- liftIO $ mapToFrame $ M.fromList tmpBindings
+  env <- ask
+  let tmpEnv = pushEnv tmpFrame env
+  vals <- traverse (evalNamed tmpEnv) bindingValues
+
+  --re-write temp bindings
+  liftIO $ traverse_ (setBinding tmpEnv) vals
+  withEnv tmpEnv (eval body)
+
+letrecSpecial2 :: Value -> Eval Value
+letrecSpecial2 v = do
+  (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr anyVal)) anyVal v
   --temporarily bind expressions to Unbound
   let tmpBindings = (fmap . fmap) (const Undefined) bindingValues
   tmpFrame <- liftIO $ mapToFrame $ M.fromList tmpBindings
@@ -152,6 +174,21 @@ letStarSpecial [bindingsExpr, body] = do
     
 letStarSpecial exprs = failEval $ FormError "let* requires binding list followed by a body" exprs
 
+letStarSpecial2 :: Value -> Eval Value
+letStarSpecial2 v = do
+  (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr anyVal)) anyVal v
+  env <- ask
+  frameMapping <- foldM (accBindings env) M.empty bindingValues
+  frame <- liftIO $ mapToFrame frameMapping
+  let newEnv = pushEnv frame env
+  withEnv newEnv (eval body) where
+    accBindings :: Env Value -> M.Map String Value -> (String, Value) -> Eval (M.Map String Value)
+    accBindings baseEnv accMappings (name, expr) = do
+      frame <- liftIO $ mapToFrame $ accMappings
+      let env = pushEnv frame baseEnv
+      val <- withEnv env (eval expr)
+      return $ M.insert name val accMappings
+
 lambdaSpecial :: [Value] -> Eval Value
 lambdaSpecial [params, body] = do
   let paramList = listToCons $ values params
@@ -160,16 +197,34 @@ lambdaSpecial [params, body] = do
   pure $ Closure env paramNames body
 lambdaSpecial exprs = failEval $ FormError "lambda form requires parameter list followed by a body" exprs
 
+lambdaSpecial2 :: Value -> Eval Value
+lambdaSpecial2 v = do
+  (paramNames, body) <- pairOf (listOf symbolExpr) anyVal v
+  env <- ask
+  pure $ Closure env paramNames body
+
 quoteSpecial :: [Value] -> Eval Value
 quoteSpecial [e] = pure e
 quoteSpecial exprs = failEval $ FormError "expected single expression to quote." exprs
+
+quoteSpecial2 :: Value -> Eval Value
+quoteSpecial2 Nil = failEval $ FormError "expected single expression to quote" []
+quoteSpecial2 (Cons v Nil) = pure v
+quoteSpecial2 v@(Cons _ _) = failEval $ FormError "expected single expression to quote." [v]
+quoteSpecial2 v = pure v
 
 macroSpecial :: [Value] -> Eval Value
 macroSpecial [params, body] = do
   ps <- listOf symbolExpr params
   env <- ask
   pure $ Macro env ps body
-macroSpecial exprs = failEval $ FormError "macro form requires parameter list followed by body" exprs  
+macroSpecial exprs = failEval $ FormError "macro form requires parameter list followed by body" exprs
+
+macroSpecial2 :: Value -> Eval Value
+macroSpecial2 v = do
+  (params, body) <- pairOf (listOf symbolExpr) anyVal v
+  env <- ask
+  pure $ Macro env params body
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
@@ -193,19 +248,18 @@ defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("-", (Fn minusFn)),
                                  ("*", (Fn $ arithFn product)),
-                                 ("if", (Special ifSpecial)),
-                                 ("let", (Special letSpecial)),
-                                 ("let*", (Special letStarSpecial)),
-                                 ("letrec", (Special letrecSpecial)),
-                                 ("lambda", (Special lambdaSpecial)),
-                                 ("quote", (Special quoteSpecial)),
+                                 ("if", (Special ifSpecial2)),
+                                 ("let", (Special letSpecial2)),
+                                 ("let*", (Special letStarSpecial2)),
+                                 ("letrec", (Special letrecSpecial2)),
+                                 ("lambda", (Special lambdaSpecial2)),
+                                 ("quote", (Special quoteSpecial2)),
                                  ("list", (Fn $ pure . listToCons)),
                                  ("car", (Fn carFn)),
                                  ("cdr", (Fn cdrFn)),
                                  ("cons", (Fn consFn)),
-                                 ("macro", (Special macroSpecial))]
+                                 ("macro", (Special macroSpecial2))]
   
-
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
 exceptT (Right v) = return v
@@ -223,7 +277,19 @@ eval expr = case expr of
   Nil -> pure expr
   (Cons hd tl) -> do
     first <- eval hd
-    applyOpM first (values tl)
+    case first of
+      (Special f) -> f tl
+      (Fn f) -> applyFnM f (values tl)
+      (Closure cEnv paramNames body) -> do
+        args <- traverse eval (values tl)
+        argFrame <- paramsFrame paramNames args
+        let env' = pushEnv argFrame cEnv
+        withEnv env' (eval body)
+      (Macro cEnv paramNames body) -> do
+        argFrame <- paramsFrame paramNames (values tl)
+        let env' = pushEnv argFrame cEnv
+        newBody <- withEnv env' (eval body)
+        eval newBody
   Undefined -> failEval DerefUndefinedError
   _ -> pure expr
 

@@ -54,7 +54,7 @@ data Value =
   | Undefined
   | Fn ([Value] -> EvalResult)
   | Closure (Env Value) [String] Value
-  | Special ([Value] -> Eval Value)
+  | Special (Value -> Eval Value)
   | Macro (Env Value) [String] Value
 
 values :: Value -> [Value]
