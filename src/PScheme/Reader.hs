@@ -15,7 +15,7 @@ module PScheme.Reader (
   ParseResult,
   parse,
   parseNext,
-  parsedValue
+  parsedValue,
   ) where
 
 import Data.Char (isSpace, isDigit, isNumber, isLetter)
@@ -202,9 +202,12 @@ readTokens s =
     Right Nothing -> Right []
     Right (Just token) -> fmap (token:) (readTokens rest)
 
-data ParseState =
-    Empty
-  | PartialList [Value] ParseState deriving (Show)
+data PartialParse =
+    PartialList [Value]
+  | PartialQuote
+  | PartialUnquote deriving (Show)
+    
+type ParseState = [PartialParse]
   
 data ParseOutcome =
     CompleteParse Value [Token]
@@ -223,43 +226,43 @@ atomTokenValue (TStr s) = Str s
 atomTokenValue (TSym s) = Symbol s
 atomTokenValue _ = error "!!!"
 
-emptyPartial :: ParseState
-emptyPartial = Empty
-
-isEmpty :: ParseState -> Bool
-isEmpty Empty = True
-isEmpty _ = False
-
-pushList :: ParseState -> ParseState
-pushList p = PartialList [] p
-
-popList :: ParseState -> Either ParseState Value
-popList (PartialList vs Empty) = Right $ listToCons $ reverse vs
-popList (PartialList vs inner) = Left $ appendPartial (listToCons $ reverse vs) inner
-
-appendPartial :: Value -> ParseState -> ParseState
-appendPartial _ Empty = error "Empty parse state"
-appendPartial v (PartialList vs inner) = PartialList (v:vs) inner
-
 parseFailed :: ReadError -> ParseResult
 parseFailed = Left
 
+finishList :: [Value] -> Value
+finishList = listToCons . reverse
+
+consumePartials :: ParseState -> Value -> Either ParseState Value
+consumePartials [] v = Right v
+consumePartials ((PartialList vs):pss) v = Left ((PartialList (v:vs)):pss)
+consumePartials (PartialQuote:pss) v = consumePartials pss (Cons (Symbol "quote") (Cons v Nil))
+consumePartials (PartialUnquote:pss) v = consumePartials pss (Cons (Symbol "unquote") (Cons v Nil))
+
+appendValue :: ParseState -> Value -> Either ParseState Value
+appendValue [] v = Right v
+appendValue ((PartialList vs):pss) v = Left $ (PartialList (v:vs)):pss
+--NOTE: top item is either quote or unquote
+appendValue pss v = consumePartials pss v
+
 parse' :: ParseState -> [Token] -> ParseResult
 parse' ps [] = Right $ Moar ps
-parse' ps (OpenParen:ts) = parse' (pushList ps) ts
-parse' Empty ts@(CloseParen:_) = parseFailed UnbalancedParens
-parse' Empty (t:ts) = Right $ CompleteParse (atomTokenValue t) ts
-parse' ps (CloseParen:ts) =
-  case (popList ps) of
-    Left ps' -> parse' ps' ts
-    Right v -> Right $ CompleteParse v ts
-parse' ps (t:ts) = parse' (appendPartial (atomTokenValue t) ps) ts
+parse' ps (OpenParen:ts) = parse' ((PartialList []):ps) ts
+parse' ps (Quote:ts) = parse' (PartialQuote:ps) ts
+parse' ps (Unquote:ts) = parse' (PartialUnquote:ps) ts
+parse' [] ts@(CloseParen:_) = parseFailed UnbalancedParens
+parse' ((PartialList vs):pss) (CloseParen:ts) = case (consumePartials pss (finishList vs)) of
+  Left pss -> parse' pss ts
+  Right v -> Right $ CompleteParse v ts
+parse' (ps:_) (CloseParen:ts) = parseFailed UnbalancedParens
+parse' pss (t:ts) = case (appendValue pss (atomTokenValue t)) of
+  Left pss' -> parse' pss' ts
+  Right v -> Right $ CompleteParse v ts
 
 parse :: [Token] -> ParseResult
-parse = parse' Empty
+parse = parse' []
 
 parseNext :: ParseOutcome -> [Token] -> ParseResult
-parseNext (CompleteParse _ unreadToks) newToks = parse' Empty (unreadToks ++ newToks)
+parseNext (CompleteParse _ unreadToks) newToks = parse' [] (unreadToks ++ newToks)
 parseNext (Moar state) tokens = parse' state tokens
 
 parseString :: String -> ParseResult
