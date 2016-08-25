@@ -4,7 +4,7 @@ import PScheme.Reader
 import PScheme.Env
 import Data.Traversable (sequence)
 import Data.Foldable (traverse_)
-import Control.Applicative (liftA2)
+import Control.Applicative (liftA2, (<*>))
 import Control.Monad (foldM)
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.Class (lift)
@@ -151,11 +151,22 @@ lambdaSpecial v = do
   env <- ask
   pure $ Closure env paramNames body
 
+unquote :: Value -> Eval Value
+unquote Nil = failEval $ FormError "expected single expression to unquote" []
+unquote (Cons v Nil)  = eval v
+unquote (Cons v tl) = failEval $ FormError "expected single expression to unquote" [v, tl]
+unquote v = eval v
+
+quoteInner :: Value -> Eval Value
+quoteInner (Cons (Symbol "unquote") l) = unquote l
+quoteInner (Cons hd tl) = pure Cons <*> quoteInner hd <*> quoteInner tl
+quoteInner v = pure v
+
 quoteSpecial :: Value -> Eval Value
 quoteSpecial Nil = failEval $ FormError "expected single expression to quote" []
-quoteSpecial (Cons v Nil) = pure v
+quoteSpecial (Cons v Nil) = quoteInner v
 quoteSpecial v@(Cons _ _) = failEval $ FormError "expected single expression to quote." [v]
-quoteSpecial v = pure v
+quoteSpecial v = quoteInner v
 
 macroSpecial :: Value -> Eval Value
 macroSpecial v = do
@@ -227,6 +238,7 @@ eval expr = case expr of
         let env' = pushEnv argFrame cEnv
         newBody <- withEnv env' (eval body)
         eval newBody
+      _ -> failEval $ FormError "Required function, macro or special form to evaluate" []
   Undefined -> failEval DerefUndefinedError
   _ -> pure expr
 
