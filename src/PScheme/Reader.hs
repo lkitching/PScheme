@@ -95,7 +95,7 @@ data ReadError =
   | UnbalancedParens deriving (Show)
 
 isDelimiter :: Char -> Bool
-isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"'
+isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"' || c == '\'' || c == ','
 
 data NumSign = Positive | Negative deriving (Show)
 data Token =
@@ -103,7 +103,9 @@ data Token =
   | TStr String
   | TSym String
   | OpenParen
-  | CloseParen deriving (Show)
+  | CloseParen
+  | Quote
+  | Unquote deriving (Show)
 
 newtype CharBuf = CharBuf String
 
@@ -136,8 +138,6 @@ data PartialToken =
     PartialString CharBuf EscapeState
   | PartialNum NumState
   | PartialSym CharBuf
-  | POpen
-  | PClose
   | None
 
 numStateToken :: NumState -> Token
@@ -159,6 +159,8 @@ readToken' None [] = ([], Right Nothing)
 readToken' None ('(':cs) = (cs, Right (Just OpenParen))
 readToken' None (')':cs) = (cs, Right (Just CloseParen))
 readToken' None ('"':cs) = readToken' (PartialString emptyBuf NoEscape) cs
+readToken' None ('\'':cs) = (cs, Right (Just Quote))
+readToken' None (',':cs) = (cs, Right (Just Unquote))
 readToken' None ('-':cs) = readToken' (PartialNum Minus) cs
 readToken' None ('+':cs) = readToken' (PartialNum Plus) cs
 readToken' None (c:cs) | isSpace c = readToken' None cs
