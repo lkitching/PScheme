@@ -7,7 +7,8 @@ module PScheme.Env (
   popEnv,
   mapToFrame,
   envOf,
-  setBinding) where
+  setBinding,
+  top) where
 
 import qualified Data.Map.Strict as M
 import Data.IORef
@@ -48,3 +49,8 @@ pushEnv = (:)
 popEnv :: Env a -> Env a
 popEnv [] = []
 popEnv (_:es) = es
+
+top :: Env a -> Env a
+top [] = []
+top e@[_] = e
+top (f:fs) = top fs

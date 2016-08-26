@@ -99,11 +99,20 @@ pairOf fs ss e = do
     [fe, se] -> liftA2 (,) (fs fe) (ss se)
     _ -> failEval $ FormError "expected pair" l
 
+oneOf :: (ExprEval a) -> (ExprEval a)
+oneOf s Nil = failEval $ FormError "expected value" [Nil]
+oneOf s (Cons v Nil) = s v
+oneOf s v@(Cons _ _) = failEval $ FormError "expected single value" [v]
+oneOf s v = s v
+
 valueOf :: (ExprEval Value)
 valueOf = eval
 
 anyVal :: ExprEval Value
 anyVal = pure
+
+anyOne :: ExprEval Value
+anyOne = oneOf anyVal
   
 letSpecial :: Value -> Eval Value
 letSpecial l = do
@@ -173,6 +182,15 @@ macroSpecial v = do
   (params, body) <- pairOf (listOf symbolExpr) anyVal v
   env <- ask
   pure $ Macro env params body
+
+evalSpecial :: Value -> Eval Value
+evalSpecial args = do
+  arg <- anyOne args
+  --eval form in the current environment
+  --eval result in top-level environment
+  form <- eval arg
+  topEnv <- fmap top ask
+  withEnv topEnv (eval form)
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
@@ -206,7 +224,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("car", (Fn carFn)),
                                  ("cdr", (Fn cdrFn)),
                                  ("cons", (Fn consFn)),
-                                 ("macro", (Special macroSpecial))]
+                                 ("macro", (Special macroSpecial)),
+                                 ("eval", (Special evalSpecial))]
   
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
