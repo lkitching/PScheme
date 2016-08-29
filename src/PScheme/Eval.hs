@@ -124,6 +124,11 @@ evalNamed :: Env Value -> (String, Value) -> Eval (String, Value)
 evalNamed env (name, expr) = do
   val <- withEnv env (eval expr)
   pure (name, val)
+
+setBinding :: Env a -> (String, a) -> IO ()
+setBinding env (name, value) = case (findBinding name env) of
+    Nothing -> return ()
+    Just ref -> setRef ref value
   
 letrecSpecial :: Value -> Eval Value
 letrecSpecial v = do
@@ -143,16 +148,14 @@ letStarSpecial :: Value -> Eval Value
 letStarSpecial v = do
   (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr anyVal)) anyVal v
   env <- ask
-  frameMapping <- foldM (accBindings env) M.empty bindingValues
-  frame <- liftIO $ mapToFrame frameMapping
+  frame <- foldM (accBindings env) newFrame bindingValues
   let newEnv = pushEnv frame env
   withEnv newEnv (eval body) where
-    accBindings :: Env Value -> M.Map String Value -> (String, Value) -> Eval (M.Map String Value)
-    accBindings baseEnv accMappings (name, expr) = do
-      frame <- liftIO $ mapToFrame $ accMappings
+    accBindings :: Env Value -> EnvFrame Value -> (String, Value) -> Eval (EnvFrame Value)
+    accBindings baseEnv frame (name, expr) = do
       let env = pushEnv frame baseEnv
       val <- withEnv env (eval expr)
-      return $ M.insert name val accMappings
+      liftIO $ addFrameBinding name val frame
 
 lambdaSpecial :: Value -> Eval Value
 lambdaSpecial v = do
@@ -191,6 +194,16 @@ evalSpecial args = do
   form <- eval arg
   topEnv <- fmap top ask
   withEnv topEnv (eval form)
+
+setSpecial :: Value -> Eval Value
+setSpecial args = do
+  (sym, valueForm) <- (pairOf symbolExpr anyVal) args
+  value <- eval valueForm
+  env <- ask
+  let mRef = findBinding sym env
+  case mRef of
+    Nothing -> failEval $ UnboundRef sym
+    Just ref -> liftIO $ setRef ref value >> pure Nil
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
@@ -225,7 +238,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("cdr", (Fn cdrFn)),
                                  ("cons", (Fn consFn)),
                                  ("macro", (Special macroSpecial)),
-                                 ("eval", (Special evalSpecial))]
+                                 ("eval", (Special evalSpecial)),
+                                 ("set!", (Special setSpecial))]
   
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e

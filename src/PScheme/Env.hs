@@ -2,18 +2,22 @@ module PScheme.Env (
   EnvFrame,
   Env,
   newEnv,
+  newFrame,
   envLookup,
   pushEnv,
   popEnv,
   mapToFrame,
   envOf,
-  setBinding,
+  findBinding,
+  addFrameBinding,
+  setRef,
   top) where
 
 import qualified Data.Map.Strict as M
 import Data.IORef
 
-type EnvFrame a = M.Map String (IORef a)
+type Ref = IORef
+type EnvFrame a = M.Map String (Ref a)
 type Env a = [EnvFrame a]
 
 newEnv :: Env a
@@ -22,14 +26,25 @@ newEnv = []
 envOf :: (M.Map String a) -> IO (Env a)
 envOf m = fmap (: []) (mapToFrame m)
 
+newFrame :: EnvFrame a
+newFrame = M.empty
+
+addFrameBinding :: String -> a -> EnvFrame a -> IO (EnvFrame a)
+addFrameBinding name initValue frame = do
+  ref <- newIORef initValue
+  pure $ M.insert name ref frame
+  
 mapToFrame :: M.Map String a -> IO (EnvFrame a)
 mapToFrame = traverse newIORef
 
-findBinding :: String -> Env a -> Maybe (IORef a)
+findBinding :: String -> Env a -> Maybe (Ref a)
 findBinding _ [] = Nothing
 findBinding k (e:es) = case (M.lookup k e) of
   r@(Just _) -> r
   Nothing -> findBinding k es
+
+setRef :: Ref a -> a -> IO ()
+setRef = writeIORef  
   
 envLookup :: String -> Env a -> IO (Maybe a)
 envLookup k env = case (findBinding k env) of
@@ -37,11 +52,6 @@ envLookup k env = case (findBinding k env) of
   (Just ref) -> do
     v <- readIORef ref
     return (Just v)
-  
-setBinding :: Env a -> (String, a) -> IO ()
-setBinding env (name, value) = case (findBinding name env) of
-    Nothing -> return ()
-    Just ref -> writeIORef ref value
 
 pushEnv :: EnvFrame a -> Env a -> Env a
 pushEnv = (:)

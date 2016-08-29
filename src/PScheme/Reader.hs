@@ -29,6 +29,7 @@ import PScheme.Env (Env)
 
 data EvalError =
     UnboundSymbol String
+  | UnboundRef String
   | OperatorRequired
   | TypeError String Value
   | FormError String [Value]
@@ -38,6 +39,7 @@ data EvalError =
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
+  show (UnboundRef name) = "Unbound variable: " ++ name
   show OperatorRequired = "Operator required"
   show (TypeError ty value) = "Unexpected type for " ++ (show value) ++ ": required " ++ ty
   show (FormError msg form) = "Invalid form: " ++ msg
