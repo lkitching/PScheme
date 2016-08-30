@@ -23,7 +23,7 @@ import Control.Monad
 import Control.Applicative
 import Data.Maybe (listToMaybe)
 import Data.List (intercalate)
-import Control.Monad.Trans.Reader (ReaderT)
+import Control.Monad.Trans.State.Lazy (StateT)
 import Control.Monad.Trans.Except (ExceptT)
 import PScheme.Env (Env)
 
@@ -86,7 +86,7 @@ instance Show Value where
   show (Macro _ _ _) = "<macro>"
 
 type EvalResult = Either EvalError Value
-type Eval a = ReaderT (Env Value) (ExceptT EvalError IO) a
+type Eval a = ExceptT EvalError (StateT (Env Value) IO) a
 
 data ReadError =
     Incomplete

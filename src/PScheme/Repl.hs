@@ -1,6 +1,7 @@
 module PScheme.Repl where
 
 import PScheme.Reader
+import PScheme.Env
 import PScheme.Eval
 import Control.Monad (forever)
 import Control.Monad.Trans.Except
@@ -49,5 +50,17 @@ evalOne = do
       ve <- runEval env (eval expr)
       putStrLn $ either show show ve
 
+evalNext :: Env Value -> IO (Env Value)
+evalNext env = do
+  re <- runExceptT readOne
+  case re of
+    Left err -> print err >> pure env
+    Right expr -> do
+      (newEnv, ve) <- evalWithState env (eval expr)
+      putStrLn $ either show show ve
+      pure newEnv
+
 repl :: IO ()
-repl = forever evalOne
+repl = defaultEnv >>= evalForever where
+  evalForever e = evalNext e >>= evalForever
+  

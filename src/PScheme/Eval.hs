@@ -9,8 +9,9 @@ import Control.Monad (foldM)
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (liftIO, MonadIO)
-import Control.Monad.Trans.Reader
+import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Except
+import Data.Tuple (swap)
 
 isTruthy :: Value -> Bool
 isTruthy (Number 0) = False
@@ -21,13 +22,10 @@ isTruthy _ = True
 applyFnM :: ([Value] -> EvalResult) -> [Value] -> Eval Value
 applyFnM f exprs = do
   vals <- traverse eval exprs
-  lift $ exceptT $ f vals
+  exceptT $ f vals
 
 failEval :: EvalError -> Eval a
-failEval err = lift $ exceptT $ Left err
-
-withEnv :: Env Value -> Eval a -> Eval a
-withEnv env = local (const env)
+failEval = throwE
 
 tryBindArgs :: [String] -> [Value] -> Either EvalError (M.Map String Value)
 tryBindArgs syms args = bind syms args M.empty where
@@ -39,7 +37,7 @@ tryBindArgs syms args = bind syms args M.empty where
 
 paramsFrame :: [String] -> [Value] -> Eval (EnvFrame Value)
 paramsFrame paramNames values = do
-  argMapping <- lift $ exceptT $ tryBindArgs paramNames values
+  argMapping <- exceptT $ tryBindArgs paramNames values
   liftIO $ mapToFrame argMapping
 
 expectNum :: Value -> Either EvalError Integer
@@ -113,13 +111,27 @@ anyVal = pure
 
 anyOne :: ExprEval Value
 anyOne = oneOf anyVal
-  
+
+local :: (Env Value -> Env Value) -> Eval a -> Eval a
+local f comp = do
+  oldState <- lift get
+  lift $ put (f oldState)
+  result <- comp
+  lift $ put oldState
+  pure result
+
 letSpecial :: Value -> Eval Value
 letSpecial l = do
   (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr valueOf)) anyVal l
   ef <- liftIO $ mapToFrame $ M.fromList bindingValues
   local (pushEnv ef) (eval body)
 
+withEnv :: Env Value -> Eval a -> Eval a
+withEnv newEnv = local (const newEnv)
+
+ask :: Monad m => StateT s m s
+ask = get
+  
 evalNamed :: Env Value -> (String, Value) -> Eval (String, Value)
 evalNamed env (name, expr) = do
   val <- withEnv env (eval expr)
@@ -136,7 +148,7 @@ letrecSpecial v = do
   --temporarily bind expressions to Unbound
   let tmpBindings = (fmap . fmap) (const Undefined) bindingValues
   tmpFrame <- liftIO $ mapToFrame $ M.fromList tmpBindings
-  env <- ask
+  env <- lift ask
   let tmpEnv = pushEnv tmpFrame env
   vals <- traverse (evalNamed tmpEnv) bindingValues
 
@@ -147,7 +159,7 @@ letrecSpecial v = do
 letStarSpecial :: Value -> Eval Value
 letStarSpecial v = do
   (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr anyVal)) anyVal v
-  env <- ask
+  env <- lift ask
   frame <- foldM (accBindings env) newFrame bindingValues
   let newEnv = pushEnv frame env
   withEnv newEnv (eval body) where
@@ -160,7 +172,7 @@ letStarSpecial v = do
 lambdaSpecial :: Value -> Eval Value
 lambdaSpecial v = do
   (paramNames, body) <- pairOf (listOf symbolExpr) anyVal v
-  env <- ask
+  env <- lift ask
   pure $ Closure env paramNames body
 
 unquote :: Value -> Eval Value
@@ -183,7 +195,7 @@ quoteSpecial v = quoteInner v
 macroSpecial :: Value -> Eval Value
 macroSpecial v = do
   (params, body) <- pairOf (listOf symbolExpr) anyVal v
-  env <- ask
+  env <- lift ask
   pure $ Macro env params body
 
 evalSpecial :: Value -> Eval Value
@@ -192,14 +204,14 @@ evalSpecial args = do
   --eval form in the current environment
   --eval result in top-level environment
   form <- eval arg
-  topEnv <- fmap top ask
+  topEnv <- fmap top (lift ask)
   withEnv topEnv (eval form)
 
 setSpecial :: Value -> Eval Value
 setSpecial args = do
   (sym, valueForm) <- (pairOf symbolExpr anyVal) args
   value <- eval valueForm
-  env <- ask
+  env <- lift ask
   let mRef = findBinding sym env
   case mRef of
     Nothing -> failEval $ UnboundRef sym
@@ -254,11 +266,11 @@ eval expr = case expr of
   Number i -> pure expr
   Str s -> pure expr
   Symbol s -> do
-    env <- ask
+    env <- lift ask
     var <- liftIO $ envLookup s env
     case var of
       Just v -> return v
-      Nothing -> lift $ throwE (UnboundSymbol s)
+      Nothing -> throwE (UnboundSymbol s)
   Nil -> pure expr
   (Cons hd tl) -> do
     first <- eval hd
@@ -280,4 +292,7 @@ eval expr = case expr of
   _ -> pure expr
 
 runEval :: Env Value -> Eval a -> IO (Either EvalError a)
-runEval env e = runExceptT $ runReaderT e env
+runEval env e = evalStateT (runExceptT e) env
+
+evalWithState :: Env Value -> Eval a -> IO (Env Value, Either EvalError a)
+evalWithState env e = fmap swap $ runStateT (runExceptT e) env
