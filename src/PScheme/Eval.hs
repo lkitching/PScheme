@@ -204,6 +204,9 @@ setSpecial args = do
   case mRef of
     Nothing -> failEval $ UnboundRef sym
     Just ref -> liftIO $ setRef ref value >> pure Nil
+
+beginSpecial :: Value -> Eval Value
+beginSpecial args = foldM (\_ f -> eval f) Nil (values args)
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
@@ -239,7 +242,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("cons", (Fn consFn)),
                                  ("macro", (Special macroSpecial)),
                                  ("eval", (Special evalSpecial)),
-                                 ("set!", (Special setSpecial))]
+                                 ("set!", (Special setSpecial)),
+                                 ("begin", (Special beginSpecial))]
   
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
