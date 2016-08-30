@@ -219,6 +219,19 @@ setSpecial args = do
 
 beginSpecial :: Value -> Eval Value
 beginSpecial args = foldM (\_ f -> eval f) Nil (values args)
+
+defineSpecial :: Value -> Eval Value
+defineSpecial args = do
+  (name, valueForm) <- (pairOf symbolExpr anyVal) args
+  --defined ref should be in scope while evaluating the value form so
+  --add undefined binding initially
+  env <- lift ask
+  (newEnv, ref) <- liftIO $ declare name Undefined env
+  value <- withEnv newEnv (eval valueForm)
+  --update declared binding with evaluated value
+  liftIO $ setRef ref value
+  --TODO: create Ref value and return that?
+  pure value
   
 carFn :: [Value] -> EvalResult
 carFn [v] = case v of
@@ -255,7 +268,8 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("macro", (Special macroSpecial)),
                                  ("eval", (Special evalSpecial)),
                                  ("set!", (Special setSpecial)),
-                                 ("begin", (Special beginSpecial))]
+                                 ("begin", (Special beginSpecial)),
+                                 ("define", (Special defineSpecial))]
   
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
