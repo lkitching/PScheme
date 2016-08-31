@@ -49,7 +49,11 @@ evalFile filePath = withFile filePath ReadMode $ \h -> do
     Left err -> print err
     Right forms -> do
       env <- defaultEnv
-      forM_ forms (\f -> fmap (either show show) (runEval env (eval f)) >>= print)
+      valsOrError <- runEval env (traverse eval forms)
+      case valsOrError of
+        Left err -> print err
+        Right vals ->
+          forM_ vals print
 
 main :: IO ()
 main = do
