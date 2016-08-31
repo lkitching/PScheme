@@ -114,10 +114,10 @@ anyOne = oneOf anyVal
 
 local :: (Env Value -> Env Value) -> Eval a -> Eval a
 local f comp = do
-  oldState <- lift get
-  lift $ put (f oldState)
+  oldEnv <- getEnv
+  setEnv (f oldEnv)
   result <- comp
-  lift $ put oldState
+  setEnv oldEnv
   pure result
 
 letSpecial :: Value -> Eval Value
@@ -129,8 +129,11 @@ letSpecial l = do
 withEnv :: Env Value -> Eval a -> Eval a
 withEnv newEnv = local (const newEnv)
 
-ask :: Monad m => StateT s m s
-ask = get
+setEnv :: Env Value -> Eval ()
+setEnv = lift . put
+
+getEnv :: Eval (Env Value)
+getEnv = lift get
   
 evalNamed :: Env Value -> (String, Value) -> Eval (String, Value)
 evalNamed env (name, expr) = do
@@ -148,7 +151,7 @@ letrecSpecial v = do
   --temporarily bind expressions to Unbound
   let tmpBindings = (fmap . fmap) (const Undefined) bindingValues
   tmpFrame <- liftIO $ mapToFrame $ M.fromList tmpBindings
-  env <- lift ask
+  env <- getEnv
   let tmpEnv = pushEnv tmpFrame env
   vals <- traverse (evalNamed tmpEnv) bindingValues
 
@@ -159,7 +162,7 @@ letrecSpecial v = do
 letStarSpecial :: Value -> Eval Value
 letStarSpecial v = do
   (bindingValues, body) <- pairOf (listOf (pairOf symbolExpr anyVal)) anyVal v
-  env <- lift ask
+  env <- getEnv
   frame <- foldM (accBindings env) newFrame bindingValues
   let newEnv = pushEnv frame env
   withEnv newEnv (eval body) where
@@ -172,7 +175,7 @@ letStarSpecial v = do
 lambdaSpecial :: Value -> Eval Value
 lambdaSpecial v = do
   (paramNames, body) <- pairOf (listOf symbolExpr) anyVal v
-  env <- lift ask
+  env <- getEnv
   pure $ Closure env paramNames body
 
 unquote :: Value -> Eval Value
@@ -195,7 +198,7 @@ quoteSpecial v = quoteInner v
 macroSpecial :: Value -> Eval Value
 macroSpecial v = do
   (params, body) <- pairOf (listOf symbolExpr) anyVal v
-  env <- lift ask
+  env <- getEnv
   pure $ Macro env params body
 
 evalSpecial :: Value -> Eval Value
@@ -204,14 +207,14 @@ evalSpecial args = do
   --eval form in the current environment
   --eval result in top-level environment
   form <- eval arg
-  topEnv <- fmap top (lift ask)
+  topEnv <- fmap top getEnv
   withEnv topEnv (eval form)
 
 setSpecial :: Value -> Eval Value
 setSpecial args = do
   (sym, valueForm) <- (pairOf symbolExpr anyVal) args
   value <- eval valueForm
-  env <- lift ask
+  env <- getEnv
   let mRef = findBinding sym env
   case mRef of
     Nothing -> failEval $ UnboundRef sym
@@ -225,9 +228,10 @@ defineSpecial args = do
   (name, valueForm) <- (pairOf symbolExpr anyVal) args
   --defined ref should be in scope while evaluating the value form so
   --add undefined binding initially
-  env <- lift ask
+  env <- getEnv
   (newEnv, ref) <- liftIO $ declare name Undefined env
-  value <- withEnv newEnv (eval valueForm)
+  setEnv newEnv
+  value <- (eval valueForm)
   --update declared binding with evaluated value
   liftIO $ setRef ref value
   --TODO: create Ref value and return that?
@@ -280,7 +284,7 @@ eval expr = case expr of
   Number i -> pure expr
   Str s -> pure expr
   Symbol s -> do
-    env <- lift ask
+    env <- getEnv
     var <- liftIO $ envLookup s env
     case var of
       Just v -> return v
