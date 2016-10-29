@@ -14,6 +14,27 @@ genString :: Gen String
 genString = fmap unwords $ listOf genWord where
   genWord = listOf1 $ elements ['a' .. 'z']
 
+instance Arbitrary NumSign where
+  arbitrary = elements [PScheme.Reader.Positive, Negative]
+  
+genToken :: Gen Token
+genToken = oneof [
+  genNum,
+  fmap TStr genString,
+  fmap TSym genIdent,
+  pure OpenParen,
+  pure CloseParen,
+  pure Quote,
+  pure Unquote
+  ] where
+  genNum = do
+    s <- arbitrary
+    n <- arbitrary :: (Gen (NonNegative Integer))
+    pure $ TNumber s (show $ getNonNegative n)
+
+instance Arbitrary Token where
+  arbitrary = genToken
+
 genValue :: Gen Value
 genValue = sized genValue' where
   genPrim = oneof [
@@ -39,12 +60,18 @@ read_prop v = case readStringOne (show v) of
   Left _ -> False
   Right r -> v == r
 
+tokenise_prop :: Token -> Bool
+tokenise_prop t = case readTokens (show t) of
+  Right [t'] -> t == t'
+  _ -> False
+
 readerTests :: TestTree
 readerTests = testGroup "Reader Tests" [qcTests, unitTests]
 
 qcTests :: TestTree
 qcTests = testGroup "Reader quickcheck tests"
-  [QC.testProperty "read" read_prop]
+  [QC.testProperty "read" read_prop,
+   QC.testProperty "tokenise" tokenise_prop]
 
 unitTests :: TestTree
 unitTests = testGroup "Reader unit tests"

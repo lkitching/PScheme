@@ -11,7 +11,8 @@ module PScheme.Reader (
   readStringOne,
   listToCons,
   ParseState(..),
-  Token,
+  NumSign(..),
+  Token(..),
   ParseOutcome,
   ParseResult,
   parse,
@@ -76,8 +77,7 @@ values (Cons hd tl) = hd:(values tl)
 values e = [e]
 
 listToCons :: [Value] -> Value
-listToCons [] = Nil
-listToCons (x:xs) = Cons x (listToCons xs)
+listToCons = foldr Cons Nil
 
 consToList :: Value -> Value -> [Value]
 consToList hd tl = hd:(values tl)
@@ -108,9 +108,14 @@ data ReadError =
   | UnbalancedParens deriving (Eq, Show)
 
 isDelimiter :: Char -> Bool
-isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"' || c == '\'' || c == ','
+isDelimiter c = isSpace c || c `elem` "()\"',"
 
-data NumSign = Positive | Negative deriving (Show)
+data NumSign = Positive | Negative deriving (Eq, Show)
+
+signChar :: NumSign -> Char
+signChar Positive = '+'
+signChar Negative = '-'
+
 data Token =
     TNumber (Maybe NumSign) String
   | TStr String
@@ -118,7 +123,17 @@ data Token =
   | OpenParen
   | CloseParen
   | Quote
-  | Unquote deriving (Show)
+  | Unquote deriving (Eq)
+
+instance Show Token where
+  show (TNumber Nothing s) = s
+  show (TNumber (Just sign) s) = (signChar sign):s
+  show (TStr s) = show s
+  show (TSym s) = s
+  show OpenParen = "("
+  show CloseParen = ")"
+  show Quote = "'"
+  show Unquote = ","
 
 newtype CharBuf = CharBuf String
 
