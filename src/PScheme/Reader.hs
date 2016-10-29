@@ -8,6 +8,7 @@ module PScheme.Reader (
   values,
   readTokens,
   parseString,
+  readStringOne,
   listToCons,
   ParseState(..),
   Token,
@@ -16,6 +17,7 @@ module PScheme.Reader (
   parse,
   parseNext,
   parsedValue,
+  escapeChars
   ) where
 
 import Data.Char (isSpace, isDigit, isNumber, isLetter)
@@ -59,6 +61,15 @@ data Value =
   | Special (Value -> Eval Value)
   | Macro (Env Value) [String] Value
 
+instance Eq Value where
+  (Number i) == (Number j) = i == j
+  (Str s1) == (Str s2) = s1 == s2
+  (Symbol s1) == (Symbol s2) = s1 == s2
+  Nil == Nil = True
+  (Cons h1 t1) == (Cons h2 t2) = h1 == h2 && t1 == t2
+  Undefined == Undefined = True
+  _ == _ = False
+
 values :: Value -> [Value]
 values Nil = []
 values (Cons hd tl) = hd:(values tl)
@@ -94,7 +105,7 @@ data ReadError =
   | InvalidEscape Char
   | InvalidChar Char
   | BadNumber String
-  | UnbalancedParens deriving (Show)
+  | UnbalancedParens deriving (Eq, Show)
 
 isDelimiter :: Char -> Bool
 isDelimiter c = isSpace c || c == '(' || c == ')' || c == '"' || c == '\'' || c == ','
@@ -155,6 +166,7 @@ appendNumChar c (WithSign sign buf) = WithSign sign (appendChar c buf)
 appendNumChar c (NoSign f buf) = NoSign f (appendChar c buf)
 
 isValidFollowingSymbolChar c = True
+escapeChars = ['\\', 'n', '"']
 
 readToken' :: PartialToken -> String -> (String, Either ReadError (Maybe Token))
 readToken' None [] = ([], Right Nothing)
@@ -177,11 +189,9 @@ readToken' (PartialString buf NoEscape) (c:cs) =
     _ -> readToken' (PartialString (appendChar c buf) NoEscape) cs
 
 readToken' (PartialString buf ExpectingEscape) s@(c:cs) =
-  case c of
-    '"' -> readToken' (PartialString (appendChar '"' buf) NoEscape) cs
-    'n' -> readToken' (PartialString (appendChar '\n' buf) NoEscape) cs
-    '\\' -> readToken' (PartialString (appendChar '\\' buf) NoEscape) cs
-    _ -> (s, Left $ InvalidEscape c)
+  if  c `elem` escapeChars
+    then readToken' (PartialString (appendChar c buf) NoEscape) cs
+    else (s, Left $ InvalidEscape c)
 
 readToken' (PartialNum state) [] = ([], Right $ Just $ numStateToken state)
 readToken' (PartialNum state) (c:cs) | isNumber c = readToken' (PartialNum (appendNumChar c state)) cs
@@ -272,3 +282,12 @@ parseString s = case (readTokens s) of
   (Left err) -> parseFailed err
   Right tokens -> parse tokens
   
+readStringOne :: String -> Either ReadError Value
+readStringOne s = do
+  tokens <- readTokens s
+  state <- parse tokens
+  case state of
+    CompleteParse v _ -> pure v
+    _ -> Left Incomplete
+    
+ 

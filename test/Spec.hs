@@ -1,2 +1,9 @@
+import Test.Tasty
+
+import ReaderTests
+
+tests :: TestTree
+tests = testGroup "Tests" [readerTests]
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = defaultMain tests
