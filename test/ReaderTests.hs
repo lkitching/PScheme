@@ -5,8 +5,6 @@ import Test.Tasty.QuickCheck as QC
 import Test.Tasty.HUnit
 import Test.QuickCheck
 
-import Data.List (foldl')
-
 import PScheme.Reader
 
 genIdent :: Gen String
