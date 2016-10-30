@@ -109,6 +109,16 @@ consTests :: TestTree
 consTests = testGroup "cons" [
   testCase "cons" $ assertEval "(cons 1 '(2 3))" (listToCons $ map Number [1, 2, 3])]
 
+evalTests' :: TestTree
+evalTests' = testGroup "eval" [
+  testCase "eval" $ assertEval "(eval '(* 2 4))" (Number 8),
+  testCase "No closure" $ assertEvalError "(eval (let ((n 2)) '(+ 1 n)))" (UnboundSymbol "n")]
+
+setTests :: TestTree
+setTests = testGroup "set!" [
+  testCase "set!" $ assertEval "(let ((a 1)) (begin (set! a 2) a))" (Number 2),
+  testCase "unbound" $ assertEvalError "(set! a 3)" (UnboundRef "a")]
+
 unitTests :: TestTree
 unitTests = testGroup "Eval unit tests" [
   testGroup "default forms" [plusTests,
@@ -123,4 +133,6 @@ unitTests = testGroup "Eval unit tests" [
                              unquoteTests,
                              listTests,
                              carTests,
-                             cdrTests]]
+                             cdrTests,
+                             evalTests',
+                             setTests]]
