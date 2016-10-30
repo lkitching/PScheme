@@ -89,6 +89,26 @@ unquoteTests = testGroup "unquote" [
   testCase "Unquote symbol" $ assertEval "(let ((a 1)) '(a ,a))" (listToCons [(Symbol "a"), (Number 1)]),
   testCase "outside quote" $ assertEvalError ",a" (UnboundSymbol "unquote")]
 
+listTests :: TestTree
+listTests = testGroup "list" [
+  testCase "No args" $ assertEval "(list)" Nil,
+  testCase "One arg" $ assertEval "(list 1)" (Cons (Number 1) Nil),
+  testCase "Multiple args" $ assertEval "(list 2 \"str\" 'a)" (listToCons [(Number 2), (Str "str"), (Symbol "a")])]
+
+carTests :: TestTree
+carTests = testGroup "car" [
+  testCase "Empty list" $ assertEval "(car '())" Nil,
+  testCase "Nonempty list" $ assertEval "(car (list 1 2 3))" (Number 1)]
+
+cdrTests :: TestTree
+cdrTests = testGroup "cdr" [
+  testCase "Empty list" $ assertEval "(cdr '())" Nil,
+  testCase "Nonempty list" $ assertEval "(cdr (list 1 2 3))" (listToCons [(Number 2), (Number 3)])]
+
+consTests :: TestTree
+consTests = testGroup "cons" [
+  testCase "cons" $ assertEval "(cons 1 '(2 3))" (listToCons $ map Number [1, 2, 3])]
+
 unitTests :: TestTree
 unitTests = testGroup "Eval unit tests" [
   testGroup "default forms" [plusTests,
@@ -100,4 +120,7 @@ unitTests = testGroup "Eval unit tests" [
                              letrecTests,
                              lambdaTests,
                              quoteTests,
-                             unquoteTests]]
+                             unquoteTests,
+                             listTests,
+                             carTests,
+                             cdrTests]]
