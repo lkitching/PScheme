@@ -38,7 +38,7 @@ data EvalError =
   | FormError String [Value]
   | ArityError Int Int
   | DerefUndefinedError
-  | ListError String
+  | ListError String deriving (Eq)
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
