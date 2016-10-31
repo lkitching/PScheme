@@ -8,6 +8,7 @@ module PScheme.Reader (
   values,
   readTokens,
   parseString,
+  readAll,
   readStringOne,
   listToCons,
   ParseState(..),
@@ -32,6 +33,7 @@ import PScheme.Env (Env)
 
 data EvalError =
     UnboundSymbol String
+  | ReadError ReadError
   | UnboundRef String
   | OperatorRequired
   | TypeError String Value
@@ -42,6 +44,7 @@ data EvalError =
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
+  show (ReadError err) = "Read error: " ++ (show err)
   show (UnboundRef name) = "Unbound variable: " ++ name
   show OperatorRequired = "Operator required"
   show (TypeError ty value) = "Unexpected type for " ++ (show value) ++ ": required " ++ ty
@@ -296,12 +299,21 @@ parseString :: String -> ParseResult
 parseString s = case (readTokens s) of
   (Left err) -> parseFailed err
   Right tokens -> parse tokens
-  
+
+readAll :: String -> Either ReadError [Value]
+readAll s = readTokens s >>= parseAll where
+  parseAll :: [Token] -> Either ReadError [Value]
+  parseAll ts = do
+    state <- parse ts
+    case state of
+      CompleteParse v [] -> pure [v]
+      CompleteParse v ts' -> fmap (v:) (parseAll ts')
+      _ -> Left Incomplete
+      
 readStringOne :: String -> Either ReadError Value
 readStringOne s = do
-  tokens <- readTokens s
-  state <- parse tokens
-  case state of
-    CompleteParse v _ -> pure v
-    _ -> Left Incomplete
-    
+  vs <- readAll s
+  case vs of
+    [] -> Left Incomplete
+    v:_ -> pure v
+

@@ -2,31 +2,28 @@ module EvalTests where
 
 import Test.Tasty
 import Test.Tasty.HUnit
+import Control.Monad (foldM)
 
 import PScheme.Reader
 import PScheme.Eval
 
-expectRead :: String -> IO Value
-expectRead f = case (readStringOne f) of
-  Left err -> (assertFailure $ "Failed to read: " ++ show err) >> pure Nil
-  Right v -> pure v
-
-expectEval :: String -> IO (Either EvalError Value)
-expectEval f = do
-  v <- expectRead f
-  env <- defaultEnv
-  runEval env (eval v)
+evalAll :: String -> IO (Either EvalError Value)
+evalAll f = case readAll f of
+  Left readErr -> pure $ Left $ ReadError readErr
+  Right vs -> do
+    env <- defaultEnv
+    runEval env $ foldM (\_ v -> eval v) Nil vs
 
 assertEval :: String -> Value -> Assertion
 assertEval input expected = do
-  r <- expectEval input
+  r <- evalAll input
   case r of
     Left err -> assertFailure $ "Eval error: " ++ show err
     Right result -> expected @=? result
 
 assertEvalError :: String -> EvalError -> Assertion
 assertEvalError input expectedErr = do
-  r <- expectEval input
+  r <- evalAll input
   case r of
     Left err -> expectedErr @=? err
     Right result -> assertFailure $ "Expected error during evaluation."
@@ -119,6 +116,15 @@ setTests = testGroup "set!" [
   testCase "set!" $ assertEval "(let ((a 1)) (begin (set! a 2) a))" (Number 2),
   testCase "unbound" $ assertEvalError "(set! a 3)" (UnboundRef "a")]
 
+defineTests :: TestTree
+defineTests = testGroup "define" [
+  testCase "sequential" $ assertEval "(define a 4) a" (Number 4),
+  testCase "recursive binding" $ assertEval (concat [
+                                                "(define factorial",
+                                                "  (lambda (x) (if x (* x (factorial (- x 1))) 1)))",
+                                                "(factorial 4)"])
+                                            (Number 24)]
+
 unitTests :: TestTree
 unitTests = testGroup "Eval unit tests" [
   testGroup "default forms" [plusTests,
@@ -135,4 +141,5 @@ unitTests = testGroup "Eval unit tests" [
                              carTests,
                              cdrTests,
                              evalTests',
-                             setTests]]
+                             setTests,
+                             defineTests]]
