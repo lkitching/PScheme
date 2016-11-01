@@ -112,6 +112,11 @@ anyVal = pure
 anyOne :: ExprEval Value
 anyOne = oneOf anyVal
 
+fnDef :: ExprEval FnDef
+fnDef v = do
+  (paramNames, body) <- pairOf (listOf symbolExpr) anyVal v
+  pure $ FnDef { paramNames = paramNames, body = body }
+
 local :: (Env Value -> Env Value) -> Eval a -> Eval a
 local f comp = do
   oldEnv <- getEnv
@@ -173,10 +178,7 @@ letStarSpecial v = do
       liftIO $ addFrameBinding name val frame
 
 lambdaSpecial :: Value -> Eval Value
-lambdaSpecial v = do
-  (paramNames, body) <- pairOf (listOf symbolExpr) anyVal v
-  env <- getEnv
-  pure $ Closure env (FnDef { paramNames = paramNames, body = body })
+lambdaSpecial v = pure Closure <*> getEnv <*> (fnDef v)
 
 unquote :: Value -> Eval Value
 unquote Nil = failEval $ FormError "expected single expression to unquote" []
@@ -196,10 +198,7 @@ quoteSpecial v@(Cons _ _) = failEval $ FormError "expected single expression to 
 quoteSpecial v = quoteInner v
 
 macroSpecial :: Value -> Eval Value
-macroSpecial v = do
-  (params, body) <- pairOf (listOf symbolExpr) anyVal v
-  env <- getEnv
-  pure $ Macro env (FnDef { paramNames = params, body = body })
+macroSpecial v = pure Macro <*> getEnv <*> (fnDef v)
 
 evalSpecial :: Value -> Eval Value
 evalSpecial args = do
