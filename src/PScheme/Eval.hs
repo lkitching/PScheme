@@ -199,7 +199,7 @@ macroSpecial :: Value -> Eval Value
 macroSpecial v = do
   (params, body) <- pairOf (listOf symbolExpr) anyVal v
   env <- getEnv
-  pure $ Macro env params body
+  pure $ Macro env (FnDef { paramNames = params, body = body })
 
 evalSpecial :: Value -> Eval Value
 evalSpecial args = do
@@ -319,7 +319,7 @@ eval expr = case expr of
         argFrame <- paramsFrame paramNames args
         let env' = pushEnv argFrame cEnv
         withEnv env' (eval body)
-      (Macro cEnv paramNames body) -> do
+      (Macro cEnv (FnDef { paramNames = paramNames, body = body })) -> do
         argFrame <- paramsFrame paramNames (values tl)
         let env' = pushEnv argFrame cEnv
         newBody <- withEnv env' (eval body)

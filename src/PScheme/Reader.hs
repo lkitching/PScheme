@@ -76,7 +76,7 @@ data Value =
   | Fn ([Value] -> EvalResult)
   | Closure (Env Value) FnDef
   | Special (Value -> Eval Value)
-  | Macro (Env Value) [String] Value
+  | Macro (Env Value) FnDef
   | Class ClassDef
 
 instance Eq Value where
@@ -111,7 +111,7 @@ instance Show Value where
   show (Fn _) = "<function>"
   show (Closure _ _) = "<closure>"
   show (Special _) = "<special>"
-  show (Macro _ _ _) = "<macro>"
+  show (Macro _ _) = "<macro>"
   show (Class _) = "<class>"
 
 type EvalResult = Either EvalError Value
