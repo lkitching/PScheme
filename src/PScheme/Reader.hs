@@ -1,4 +1,5 @@
 module PScheme.Reader (
+  ClassDef(..),
   Value(..),
   ReadError(..),
   Eval,
@@ -53,6 +54,12 @@ instance Show EvalError where
   show DerefUndefinedError = "Cannot evaluate undefined"
   show (ListError msg) = "List error: " ++ msg
 
+data ClassDef = ClassDef {
+  classEnv :: Env Value,
+  parent :: Maybe ClassDef,
+  fieldNames :: [String]
+}
+
 data Value =
     Number Integer
   | Str String
@@ -64,6 +71,7 @@ data Value =
   | Closure (Env Value) [String] Value
   | Special (Value -> Eval Value)
   | Macro (Env Value) [String] Value
+  | Class ClassDef
 
 instance Eq Value where
   (Number i) == (Number j) = i == j
@@ -98,6 +106,7 @@ instance Show Value where
   show (Closure _ _ _) = "<closure>"
   show (Special _) = "<special>"
   show (Macro _ _ _) = "<macro>"
+  show (Class _) = "<class>"
 
 type EvalResult = Either EvalError Value
 type Eval a = ExceptT EvalError (StateT (Env Value) IO) a

@@ -254,6 +254,23 @@ cdrFn vs = Left $ ArityError 1 (length vs)
 consFn :: [Value] -> EvalResult
 consFn [f, s] = Right $ Cons f s
 consFn vs = Left $ ArityError 2 (length vs)
+
+rootClass :: ClassDef
+rootClass = ClassDef { classEnv = newEnv, parent = Nothing, fieldNames = [] }
+
+classExpr :: Value -> Eval ClassDef
+classExpr (Class def) = pure def
+classExpr v = failEval $ TypeError "class" v
+  
+makeClassSpecial :: Value -> Eval Value
+makeClassSpecial args = do
+  (parentSym, t) <- uncons args
+  parentVal <- eval parentSym
+  parent <- classExpr parentVal
+  (fieldList, methodDefs) <- uncons t
+  fieldNames <- (listOf symbolExpr) fieldList
+  env <- getEnv
+  pure $ Class $ ClassDef { classEnv = env, parent = Just parent, fieldNames = fieldNames }
   
 defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
@@ -273,7 +290,9 @@ defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
                                  ("eval", (Special evalSpecial)),
                                  ("set!", (Special setSpecial)),
                                  ("begin", (Special beginSpecial)),
-                                 ("define", (Special defineSpecial))]
+                                 ("define", (Special defineSpecial)),
+                                 ("make-class", (Special makeClassSpecial)),
+                                 ("root", (Class rootClass))]
   
 exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
