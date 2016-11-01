@@ -298,6 +298,12 @@ exceptT :: Monad m => Either e a -> ExceptT e m a
 exceptT (Left e) = throwE e
 exceptT (Right v) = return v
 
+applyFn :: Env Value -> FnDef -> [Value] -> Eval Value
+applyFn env (FnDef { paramNames = paramNames, body = body }) args = do
+  argFrame <- paramsFrame paramNames args
+  let env' = pushEnv argFrame env
+  withEnv env' (eval body)
+
 eval :: Value -> Eval Value
 eval expr = case expr of
   Number i -> pure expr
@@ -314,15 +320,11 @@ eval expr = case expr of
     case first of
       (Special f) -> f tl
       (Fn f) -> applyFnM f (values tl)
-      (Closure cEnv (FnDef { paramNames = paramNames, body = body })) -> do
+      (Closure cEnv fn) -> do
         args <- traverse eval (values tl)
-        argFrame <- paramsFrame paramNames args
-        let env' = pushEnv argFrame cEnv
-        withEnv env' (eval body)
-      (Macro cEnv (FnDef { paramNames = paramNames, body = body })) -> do
-        argFrame <- paramsFrame paramNames (values tl)
-        let env' = pushEnv argFrame cEnv
-        newBody <- withEnv env' (eval body)
+        applyFn cEnv fn args
+      (Macro cEnv fn) -> do
+        newBody <- applyFn cEnv fn (values tl)
         eval newBody
       _ -> failEval $ FormError "Required function, macro or special form to evaluate" []
   Undefined -> failEval DerefUndefinedError
