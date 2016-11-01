@@ -29,6 +29,7 @@ import Control.Monad
 import Control.Applicative
 import Data.Maybe (listToMaybe)
 import Data.List (intercalate)
+import qualified Data.Map.Strict as M
 import Control.Monad.Trans.State.Lazy (StateT)
 import Control.Monad.Trans.Except (ExceptT)
 import PScheme.Env (Env)
@@ -58,8 +59,12 @@ instance Show EvalError where
 data ClassDef = ClassDef {
   classEnv :: Env Value,
   parent :: Maybe ClassDef,
-  fieldNames :: [String]
+  fieldNames :: [String],
+  methods :: M.Map String FnDef
 }
+
+instance Show ClassDef where
+  show (ClassDef { fieldNames = fieldNames, methods = methods }) = "Fields = " ++ (show fieldNames) ++ ", Methods = " ++ (show $ M.keys methods)
 
 data FnDef = FnDef {
   paramNames :: [String],
@@ -112,7 +117,7 @@ instance Show Value where
   show (Closure _ _) = "<closure>"
   show (Special _) = "<special>"
   show (Macro _ _) = "<macro>"
-  show (Class _) = "<class>"
+  show (Class def) = "<class> " ++ (show def)
 
 type EvalResult = Either EvalError Value
 type Eval a = ExceptT EvalError (StateT (Env Value) IO) a

@@ -255,11 +255,18 @@ consFn [f, s] = Right $ Cons f s
 consFn vs = Left $ ArityError 2 (length vs)
 
 rootClass :: ClassDef
-rootClass = ClassDef { classEnv = newEnv, parent = Nothing, fieldNames = [] }
+rootClass = ClassDef { classEnv = newEnv, parent = Nothing, fieldNames = [], methods = M.empty }
 
 classExpr :: Value -> Eval ClassDef
 classExpr (Class def) = pure def
 classExpr v = failEval $ TypeError "class" v
+
+methodExpr :: ExprEval (String, FnDef)
+methodExpr vs = do
+  (nameSym, def) <- uncons vs
+  name <- symbolExpr nameSym
+  f <- fnDef def
+  pure (name, f)
   
 makeClassSpecial :: Value -> Eval Value
 makeClassSpecial args = do
@@ -268,8 +275,9 @@ makeClassSpecial args = do
   parent <- classExpr parentVal
   (fieldList, methodDefs) <- uncons t
   fieldNames <- (listOf symbolExpr) fieldList
+  methods <- (listOf methodExpr) methodDefs
   env <- getEnv
-  pure $ Class $ ClassDef { classEnv = env, parent = Just parent, fieldNames = fieldNames }
+  pure $ Class $ ClassDef { classEnv = env, parent = Just parent, fieldNames = fieldNames, methods = (M.fromList methods) }
   
 defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
