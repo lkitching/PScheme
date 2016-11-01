@@ -1,5 +1,6 @@
 module PScheme.Reader (
   ClassDef(..),
+  FnDef(..),
   Value(..),
   ReadError(..),
   Eval,
@@ -60,6 +61,11 @@ data ClassDef = ClassDef {
   fieldNames :: [String]
 }
 
+data FnDef = FnDef {
+  paramNames :: [String],
+  body :: Value
+}
+
 data Value =
     Number Integer
   | Str String
@@ -68,7 +74,7 @@ data Value =
   | Cons Value Value
   | Undefined
   | Fn ([Value] -> EvalResult)
-  | Closure (Env Value) [String] Value
+  | Closure (Env Value) FnDef
   | Special (Value -> Eval Value)
   | Macro (Env Value) [String] Value
   | Class ClassDef
@@ -103,7 +109,7 @@ instance Show Value where
   show (Cons x y) = "(" ++ (show x) ++ " . " ++ (show y) ++ ")"
   show Undefined = "<undefined>"
   show (Fn _) = "<function>"
-  show (Closure _ _ _) = "<closure>"
+  show (Closure _ _) = "<closure>"
   show (Special _) = "<special>"
   show (Macro _ _ _) = "<macro>"
   show (Class _) = "<class>"

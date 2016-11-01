@@ -176,7 +176,7 @@ lambdaSpecial :: Value -> Eval Value
 lambdaSpecial v = do
   (paramNames, body) <- pairOf (listOf symbolExpr) anyVal v
   env <- getEnv
-  pure $ Closure env paramNames body
+  pure $ Closure env (FnDef { paramNames = paramNames, body = body })
 
 unquote :: Value -> Eval Value
 unquote Nil = failEval $ FormError "expected single expression to unquote" []
@@ -314,7 +314,7 @@ eval expr = case expr of
     case first of
       (Special f) -> f tl
       (Fn f) -> applyFnM f (values tl)
-      (Closure cEnv paramNames body) -> do
+      (Closure cEnv (FnDef { paramNames = paramNames, body = body })) -> do
         args <- traverse eval (values tl)
         argFrame <- paramsFrame paramNames args
         let env' = pushEnv argFrame cEnv
