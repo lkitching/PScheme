@@ -278,6 +278,24 @@ makeClassSpecial args = do
   methods <- (listOf methodExpr) methodDefs
   env <- getEnv
   pure $ Class $ ClassDef { classEnv = env, parent = Just parent, fieldNames = fieldNames, methods = (M.fromList methods) }
+
+getConstructor :: ClassDef -> FnDef
+getConstructor (ClassDef { methods = methods }) = M.findWithDefault defaultConstructor "init" methods where
+  defaultConstructor = FnDef { paramNames = [], body = Nil }
+
+invokeMethod :: Object -> FnDef -> [Value] -> Eval Value
+invokeMethod (Object { fields = fields }) fn args = do
+  baseEnv <- getEnv
+  --TODO: add bindings for this and super
+  applyFn (pushEnv fields baseEnv) fn args
+  
+newObject :: ClassDef -> [Value] -> Eval Value
+newObject classDef@(ClassDef { classEnv = env, fieldNames = fieldNames, methods = methods }) args = do
+  fields <- liftIO $ mapToFrame (M.fromList $ map (\f -> (f, Undefined)) fieldNames)
+  let obj = Object classDef fields
+  let constructor = getConstructor classDef
+  invokeMethod obj constructor args
+  pure $ Obj obj
   
 defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
@@ -333,7 +351,18 @@ eval expr = case expr of
       (Macro cEnv fn) -> do
         newBody <- applyFn cEnv fn (values tl)
         eval newBody
-      _ -> failEval $ FormError "Required function, macro or special form to evaluate" []
+      (Class classDef) -> do
+        args <- traverse eval (values tl)
+        newObject classDef args
+      (Obj obj@(Object { classDef = cls@(ClassDef { methods = methods }) })) -> do
+        (methodSym, args) <- uncons tl
+        methodName <- symbolExpr methodSym
+        case (M.lookup methodName methods) of
+          Nothing -> failEval $ MissingMethod methodName
+          Just method -> do
+            argList <- traverse eval (values args)
+            invokeMethod obj method argList
+      _ -> failEval $ FormError "Required function, class, macro or special form to evaluate" []
   Undefined -> failEval DerefUndefinedError
   _ -> pure expr
 

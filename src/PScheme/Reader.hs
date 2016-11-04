@@ -1,6 +1,7 @@
 module PScheme.Reader (
   ClassDef(..),
   FnDef(..),
+  Object(..),
   Value(..),
   ReadError(..),
   Eval,
@@ -32,7 +33,7 @@ import Data.List (intercalate)
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.State.Lazy (StateT)
 import Control.Monad.Trans.Except (ExceptT)
-import PScheme.Env (Env)
+import PScheme.Env (Env, EnvFrame)
 
 data EvalError =
     UnboundSymbol String
@@ -43,7 +44,8 @@ data EvalError =
   | FormError String [Value]
   | ArityError Int Int
   | DerefUndefinedError
-  | ListError String deriving (Eq)
+  | ListError String
+  | MissingMethod String deriving (Eq)
 
 instance Show EvalError where
   show (UnboundSymbol sym) = "Unbound symbol: " ++ sym
@@ -55,6 +57,7 @@ instance Show EvalError where
   show (ArityError expected actual) = "Wrong number of arguments (" ++ (show actual) ++ "). Expected: " ++ (show expected)
   show DerefUndefinedError = "Cannot evaluate undefined"
   show (ListError msg) = "List error: " ++ msg
+  show (MissingMethod name) = "Method \"" ++ name ++ "\" not found"
 
 data ClassDef = ClassDef {
   classEnv :: Env Value,
@@ -71,6 +74,11 @@ data FnDef = FnDef {
   body :: Value
 }
 
+data Object = Object {
+  classDef :: ClassDef,
+  fields :: EnvFrame Value
+}
+
 data Value =
     Number Integer
   | Str String
@@ -83,6 +91,7 @@ data Value =
   | Special (Value -> Eval Value)
   | Macro (Env Value) FnDef
   | Class ClassDef
+  | Obj Object
 
 instance Eq Value where
   (Number i) == (Number j) = i == j
@@ -118,6 +127,7 @@ instance Show Value where
   show (Special _) = "<special>"
   show (Macro _ _) = "<macro>"
   show (Class def) = "<class> " ++ (show def)
+  show (Obj _) = "<object>"
 
 type EvalResult = Either EvalError Value
 type Eval a = ExceptT EvalError (StateT (Env Value) IO) a
