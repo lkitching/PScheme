@@ -284,10 +284,11 @@ getConstructor (ClassDef { methods = methods }) = M.findWithDefault defaultConst
   defaultConstructor = FnDef { paramNames = [], body = Nil }
 
 invokeMethod :: Object -> FnDef -> [Value] -> Eval Value
-invokeMethod (Object { fields = fields }) fn args = do
+invokeMethod recv@(Object { fields = fields, classDef = cls }) fn args = do
   baseEnv <- getEnv
-  --TODO: add bindings for this and super
-  applyFn (pushEnv fields baseEnv) fn args
+  --TODO: add binding for super
+  callEnv <- liftIO $ mapToFrame (M.fromList [("this", Obj recv), ("class", Class cls)])
+  applyFn (pushEnv callEnv (pushEnv fields baseEnv)) fn args
   
 newObject :: ClassDef -> [Value] -> Eval Value
 newObject classDef@(ClassDef { classEnv = env, fieldNames = fieldNames, methods = methods }) args = do
