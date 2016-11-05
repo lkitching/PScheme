@@ -280,14 +280,13 @@ makeClassSpecial args = do
   pure $ Class $ ClassDef { classEnv = env, parent = Just parent, fieldNames = fieldNames, methods = (M.fromList methods) }
 
 getConstructor :: ClassDef -> FnDef
-getConstructor (ClassDef { methods = methods }) = M.findWithDefault defaultConstructor "init" methods where
+getConstructor cls@(ClassDef { methods = methods }) = M.findWithDefault defaultConstructor "init" methods where
   defaultConstructor = FnDef { paramNames = [], body = Nil }
 
-invokeMethod :: Object -> FnDef -> [Value] -> Eval Value
-invokeMethod recv@(Object { fields = fields, classDef = cls }) fn args = do
+invokeMethod :: Object -> MethodDecl -> [Value] -> Eval Value
+invokeMethod recv@(Object { fields = fields, classDef = thisClass }) methodDecl@(methodName, fn, methodDeclClass) args = do
   baseEnv <- getEnv
-  --TODO: add binding for super
-  callEnv <- liftIO $ mapToFrame (M.fromList [("this", Obj recv), ("class", Class cls)])
+  callEnv <- liftIO $ mapToFrame (M.fromList [("this", Obj recv), ("class", Class thisClass), ("super", SuperCall methodDeclClass recv)])
   applyFn (pushEnv callEnv (pushEnv fields baseEnv)) fn args
   
 newObject :: ClassDef -> [Value] -> Eval Value
@@ -295,8 +294,24 @@ newObject classDef@(ClassDef { classEnv = env, fieldNames = fieldNames, methods 
   fields <- liftIO $ mapToFrame (M.fromList $ map (\f -> (f, Undefined)) fieldNames)
   let obj = Object classDef fields
   let constructor = getConstructor classDef
-  invokeMethod obj constructor args
+  invokeMethod obj ("init", constructor, classDef) args
   pure $ Obj obj
+
+findMethod :: String -> ClassDef -> Maybe MethodDecl
+findMethod methodName cls@(ClassDef { methods = methods, parent = parent }) =
+  case (M.lookup methodName methods) of
+    Just m -> Just (methodName, m, cls)
+    Nothing -> parent >>= (findMethod methodName)
+
+evalMethod :: Object -> ClassDef -> Value -> Eval Value
+evalMethod obj cls methodNameAndArgs = do
+  (methodSym, args) <- uncons methodNameAndArgs
+  methodName <- symbolExpr methodSym
+  case findMethod methodName cls of
+    Nothing -> failEval $ MissingMethod methodName
+    Just methodDecl -> do
+      argList <- traverse eval (values args)
+      invokeMethod obj methodDecl argList
   
 defaultEnv :: IO (Env Value)
 defaultEnv = envOf $ M.fromList [("+", (Fn plusFn)),
@@ -355,14 +370,11 @@ eval expr = case expr of
       (Class classDef) -> do
         args <- traverse eval (values tl)
         newObject classDef args
-      (Obj obj@(Object { classDef = cls@(ClassDef { methods = methods }) })) -> do
-        (methodSym, args) <- uncons tl
-        methodName <- symbolExpr methodSym
-        case (M.lookup methodName methods) of
-          Nothing -> failEval $ MissingMethod methodName
-          Just method -> do
-            argList <- traverse eval (values args)
-            invokeMethod obj method argList
+      (Obj obj@(Object { classDef = cls })) -> do
+        evalMethod obj cls tl
+      (SuperCall cls recv) -> do
+        evalMethod recv cls tl
+        
       _ -> failEval $ FormError "Required function, class, macro or special form to evaluate" []
   Undefined -> failEval DerefUndefinedError
   _ -> pure expr

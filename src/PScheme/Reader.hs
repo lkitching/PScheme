@@ -1,6 +1,7 @@
 module PScheme.Reader (
   ClassDef(..),
   FnDef(..),
+  MethodDecl,
   Object(..),
   Value(..),
   ReadError(..),
@@ -79,6 +80,9 @@ data Object = Object {
   fields :: EnvFrame Value
 }
 
+--represents a method definition and its declaring class
+type MethodDecl = (String, FnDef, ClassDef)
+
 data Value =
     Number Integer
   | Str String
@@ -92,6 +96,7 @@ data Value =
   | Macro (Env Value) FnDef
   | Class ClassDef
   | Obj Object
+  | SuperCall ClassDef Object
 
 instance Eq Value where
   (Number i) == (Number j) = i == j
@@ -128,6 +133,7 @@ instance Show Value where
   show (Macro _ _) = "<macro>"
   show (Class def) = "<class> " ++ (show def)
   show (Obj _) = "<object>"
+  show (SuperCall _ _) = "<super>"
 
 type EvalResult = Either EvalError Value
 type Eval a = ExceptT EvalError (StateT (Env Value) IO) a
