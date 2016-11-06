@@ -3,6 +3,8 @@ module EvalTests where
 import Test.Tasty
 import Test.Tasty.HUnit
 import Control.Monad (foldM)
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import PScheme.Reader
 import PScheme.Eval
@@ -125,6 +127,62 @@ defineTests = testGroup "define" [
                                                 "(factorial 4)"])
                                             (Number 24)]
 
+makeClassTest :: Assertion
+makeClassTest = do
+  r <- evalAll (concat [
+                   "(define Parent (make-class root () (base () 'base)))",
+                   "(make-class Parent (f1 f2) (child () 'child))"])
+  case r of
+    Left err -> assertFailure $ "Eval error: " ++ (show err)
+    Right (Class (ClassDef { parent = Just (ClassDef { fieldNames = parentFields,
+                                                methods = parentMethods }),
+                      fieldNames = childFields,
+                      methods = childMethods })) -> do
+      parentFields @=? []
+      (M.keysSet parentMethods) @=? (S.fromList ["base", "init"])
+      childFields @=? ["f1", "f2"]
+      (M.keysSet childMethods) @=? (S.fromList ["child", "init"])
+      
+    Right v -> assertFailure $ "Expected class definition, got " ++ (show v)
+
+testClassDefs :: [String]
+testClassDefs = [
+  "(define Cat (make-class root",
+  "                        (size)",
+  "                        (init (s) (set! size s))",
+  "                        (get-size () size)",
+  "                        (poke () (this roar))",
+  "                        (roar () 'meow)))",
+  "(define Lion (make-class Cat",
+  "                         (name)",
+  "                         (init (n) (begin (super init 'big) (set! name n)))",
+  "                         (get-name () name)",
+  "                         (clone () (class name))",
+  "                         (roar () 'rooar)",
+  "                         (missing-super () (super missing-super))",
+  "                         (get-base-field () size)))"]
+
+assertObjectExpr :: String -> Value -> Assertion
+assertObjectExpr s expected = assertEval (concat $ testClassDefs ++ [s]) expected
+
+assertObjectError :: String -> EvalError -> Assertion
+assertObjectError s expectedError = assertEvalError (concat $ testClassDefs ++ [s]) expectedError
+
+makeClassTests :: TestTree
+makeClassTests = testGroup "make-class" [
+  testCase "make-class" makeClassTest]
+
+objectTests :: TestTree
+objectTests = testGroup "objects" [
+  testCase "constructor" $ assertObjectExpr "((Cat 'small) get-size)" (Symbol "small"),
+  testCase "child constructor should call base" $ assertObjectExpr "((Lion 'dave) get-size)" (Symbol "big"),
+  testCase "child constructor should set field" $ assertObjectExpr "((Lion 'tony) get-name)" (Symbol "tony"),
+  testCase "class should resolve to class instance" $ assertObjectExpr "(((Lion 'fluffy) clone) get-name)" (Symbol "fluffy"),
+  testCase "this should invoke method in receiver class" $ assertObjectExpr "((Lion 'leo) poke)" (Symbol "rooar"),
+  testCase "subclass cannot access base class fields" $ assertObjectError "((Lion 'tony) get-base-field)" (UnboundSymbol "size"),
+  testCase "invalid receiver method" $ assertObjectError "((Lion 'dave) invalid-method)" (MissingMethod "invalid-method"),
+  testCase "invalid super method" $ assertObjectError "((Lion 'fluffy) missing-super)" (MissingMethod "missing-super")
+  ]
 unitTests :: TestTree
 unitTests = testGroup "Eval unit tests" [
   testGroup "default forms" [plusTests,
@@ -142,4 +200,6 @@ unitTests = testGroup "Eval unit tests" [
                              cdrTests,
                              evalTests',
                              setTests,
-                             defineTests]]
+                             defineTests,
+                             makeClassTests,
+                             objectTests]]
