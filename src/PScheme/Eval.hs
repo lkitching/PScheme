@@ -255,7 +255,10 @@ consFn [f, s] = Right $ Cons f s
 consFn vs = Left $ ArityError 2 (length vs)
 
 rootClass :: ClassDef
-rootClass = ClassDef { classEnv = newEnv, parent = Nothing, fieldNames = [], methods = M.empty }
+rootClass = ClassDef { classEnv = newEnv,
+                       parent = Nothing,
+                       fieldNames = [],
+                       methods = M.fromList [("init", defaultConstructor)] }
 
 classExpr :: Value -> Eval ClassDef
 classExpr (Class def) = pure def
@@ -267,6 +270,11 @@ methodExpr vs = do
   name <- symbolExpr nameSym
   f <- fnDef def
   pure (name, f)
+
+insertIfMissing :: Ord k => k -> v -> M.Map k v -> M.Map k v
+insertIfMissing = M.insertWith (\new old -> old)
+
+defaultConstructor = FnDef { paramNames = [], body = Nil }
   
 makeClassSpecial :: Value -> Eval Value
 makeClassSpecial args = do
@@ -275,26 +283,46 @@ makeClassSpecial args = do
   parent <- classExpr parentVal
   (fieldList, methodDefs) <- uncons t
   fieldNames <- (listOf symbolExpr) fieldList
-  methods <- (listOf methodExpr) methodDefs
+  declaredMethods <- (listOf methodExpr) methodDefs
+  let methods = insertIfMissing "init" defaultConstructor (M.fromList declaredMethods)
   env <- getEnv
-  pure $ Class $ ClassDef { classEnv = env, parent = Just parent, fieldNames = fieldNames, methods = (M.fromList methods) }
+  pure $ Class $ ClassDef { classEnv = env,
+                            parent = Just parent,
+                            fieldNames = fieldNames,
+                            methods = methods }
 
 getConstructor :: ClassDef -> FnDef
-getConstructor cls@(ClassDef { methods = methods }) = M.findWithDefault defaultConstructor "init" methods where
-  defaultConstructor = FnDef { paramNames = [], body = Nil }
+getConstructor cls@(ClassDef { methods = methods }) = M.findWithDefault defaultConstructor "init" methods
+
+restrictKeys :: Ord k => M.Map k v -> [k] -> M.Map k v
+restrictKeys m ks = foldr accKey M.empty ks where
+  accKey k accM = case (M.lookup k m) of
+    Nothing -> accM
+    Just v -> M.insert k v accM
 
 invokeMethod :: Object -> MethodDecl -> [Value] -> Eval Value
 invokeMethod recv@(Object { fields = fields, classDef = thisClass }) methodDecl@(methodName, fn, methodDeclClass) args = do
   baseEnv <- getEnv
-  callEnv <- liftIO $ mapToFrame (M.fromList [("this", Obj recv), ("class", Class thisClass), ("super", SuperCall methodDeclClass recv)])
-  applyFn (pushEnv callEnv (pushEnv fields baseEnv)) fn args
+  callEnv <- liftIO $ mapToFrame (M.fromList [("this", Obj recv),
+                                              ("class", Class thisClass),
+                                              ("super", SuperCall methodName methodDeclClass recv)])
+  let visibleFields = restrictKeys fields (fieldNames methodDeclClass)
+  applyFn (pushEnv callEnv (pushEnv visibleFields baseEnv)) fn args
+
+ancestors :: ClassDef -> [ClassDef]
+ancestors cls@(ClassDef { parent = parent }) =
+  case parent of
+    Nothing -> [cls]
+    Just p -> cls:(ancestors p)
+
+objectFields :: ClassDef -> [String]
+objectFields = concatMap fieldNames . ancestors
   
-newObject :: ClassDef -> [Value] -> Eval Value
-newObject classDef@(ClassDef { classEnv = env, fieldNames = fieldNames, methods = methods }) args = do
-  fields <- liftIO $ mapToFrame (M.fromList $ map (\f -> (f, Undefined)) fieldNames)
+newObject :: ClassDef -> Value -> Eval Value
+newObject classDef argList = do
+  fields <- liftIO $ mapToFrame (M.fromList $ map (\f -> (f, Undefined)) (objectFields classDef))
   let obj = Object classDef fields
-  let constructor = getConstructor classDef
-  invokeMethod obj ("init", constructor, classDef) args
+  evalMethod obj classDef (Cons (Symbol "init") argList)
   pure $ Obj obj
 
 findMethod :: String -> ClassDef -> Maybe MethodDecl
@@ -368,12 +396,13 @@ eval expr = case expr of
         newBody <- applyFn cEnv fn (values tl)
         eval newBody
       (Class classDef) -> do
-        args <- traverse eval (values tl)
-        newObject classDef args
+        newObject classDef tl
       (Obj obj@(Object { classDef = cls })) -> do
         evalMethod obj cls tl
-      (SuperCall cls recv) -> do
-        evalMethod recv cls tl
+      (SuperCall methodName (ClassDef { parent = parent }) recv) -> do
+        case parent of
+          Just p -> evalMethod recv p tl
+          Nothing -> failEval $ MissingMethod methodName
         
       _ -> failEval $ FormError "Required function, class, macro or special form to evaluate" []
   Undefined -> failEval DerefUndefinedError

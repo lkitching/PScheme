@@ -96,7 +96,7 @@ data Value =
   | Macro (Env Value) FnDef
   | Class ClassDef
   | Obj Object
-  | SuperCall ClassDef Object
+  | SuperCall String ClassDef Object
 
 instance Eq Value where
   (Number i) == (Number j) = i == j
@@ -133,7 +133,7 @@ instance Show Value where
   show (Macro _ _) = "<macro>"
   show (Class def) = "<class> " ++ (show def)
   show (Obj _) = "<object>"
-  show (SuperCall _ _) = "<super>"
+  show (SuperCall methodName _ _) = "<super> " ++ methodName
 
 type EvalResult = Either EvalError Value
 type Eval a = ExceptT EvalError (StateT (Env Value) IO) a
